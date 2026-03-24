@@ -1,0 +1,47 @@
+{
+  "expo": {
+    "name": "Nexus Flow",
+    "slug": "nexus-flow",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.nexusflow.tracking",
+      "infoPlist": {
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Nexus Flow traccia il percorso del camion in background per documentare i risparmi operativi.",
+        "NSLocationAlwaysUsageDescription": "Nexus Flow richiede la posizione sempre attiva per il tracciamento completo della giornata lavorativa.",
+        "NSLocationWhenInUseUsageDescription": "Nexus Flow utilizza la posizione per tracciare percorsi e soste.",
+        "UIBackgroundModes": ["location", "fetch"]
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#000000"
+      },
+      "package": "com.nexusflow.tracking",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_LOCATION"
+      ]
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Nexus Flow traccia il percorso del camion in background per documentare i risparmi operativi.",
+          "locationAlwaysPermission": "Nexus Flow richiede la posizione sempre attiva per il tracciamento completo della giornata.",
+          "locationWhenInUsePermission": "Nexus Flow utilizza la posizione per tracciare percorsi e soste.",
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
+        }
+      ]
+    ],
+    "assetBundlePatterns": ["**/*"],
+    "sdkVersion": "54.0.0"
+  }
+}
