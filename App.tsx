@@ -3,8 +3,6 @@
 // ============================================================
 
 import { registerRootComponent } from 'expo';
-import * as FileSystem from 'expo-file-system';
-import * as Sharing from 'expo-sharing';
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
@@ -13,6 +11,7 @@ import {
   ScrollView,
   StyleSheet,
   Alert,
+  Share,
   StatusBar,
   SafeAreaView,
   AppState,
@@ -679,21 +678,13 @@ export default function App() {
     };
 
     try {
-      const fileName = `nexusflow_${day.date}.json`;
-      const fileUri = FileSystem.cacheDirectory + fileName;
-      await FileSystem.writeAsStringAsync(fileUri, JSON.stringify(payload, null, 2), {
-        encoding: FileSystem.EncodingType.UTF8,
-      });
-      const canShare = await Sharing.isAvailableAsync();
-      if (canShare) {
-        await Sharing.shareAsync(fileUri, {
-          mimeType: 'application/json',
-          dialogTitle: 'Salva o condividi la giornata',
-          UTI: 'public.json',
-        });
-      } else {
-        Alert.alert('Errore', 'Condivisione non disponibile su questo dispositivo.');
-      }
+      await Share.share(
+        {
+          title: `nexusflow_${day.date}.json`,
+          message: JSON.stringify(payload, null, 2),
+        },
+        { dialogTitle: 'Esporta dati giornata' },
+      );
     } catch (e: any) {
       Alert.alert('Errore export', e.message ?? 'Impossibile esportare il file.');
     }
