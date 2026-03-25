@@ -2,6 +2,7 @@
 // NEXUS FLOW — Fase 1: App di Tracking Giornata
 // ============================================================
 
+import { registerRootComponent } from 'expo';
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
@@ -966,3 +967,5 @@ const s = StyleSheet.create({
     marginTop: 3,
   },
 });
+
+registerRootComponent(App);
