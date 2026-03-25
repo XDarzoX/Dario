@@ -546,13 +546,18 @@ export default function App() {
   // ── polling UI ────────────────────────────────────────────
   async function updateCity(): Promise<void> {
     try {
-      const pos = await Location.getLastKnownPositionAsync();
-      if (pos) {
-        const res = await Location.reverseGeocodeAsync({
-          latitude: pos.coords.latitude,
-          longitude: pos.coords.longitude,
-        });
-        if (res.length > 0 && res[0].city) setCurrentCity(res[0].city);
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') return;
+      const pos = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+      const res = await Location.reverseGeocodeAsync({
+        latitude: pos.coords.latitude,
+        longitude: pos.coords.longitude,
+      });
+      if (res.length > 0) {
+        const r = res[0];
+        setCurrentCity(r.city || r.subregion || r.region || '—');
       }
     } catch { /* ignora */ }
   }
@@ -647,6 +652,10 @@ export default function App() {
   // ── EXPORT ────────────────────────────────────────────────
   async function exportDay(): Promise<void> {
     const day = await loadDay();
+    if (day.trips.length === 0 && day.stops.length === 0) {
+      Alert.alert('Nessun dato', 'Avvia il tracking prima di esportare.');
+      return;
+    }
     const totalKm = day.trips.reduce((s, t) => s + t.distanceMeters, 0) / 1000;
     const totalStopSec = day.stops.reduce((s, st) => s + st.durationSec, 0);
 
@@ -667,10 +676,17 @@ export default function App() {
       soste: day.stops,
     };
 
-    await Share.share({
-      title: `nexusflow_${day.date}.json`,
-      message: JSON.stringify(payload, null, 2),
-    });
+    try {
+      await Share.share(
+        {
+          title: `nexusflow_${day.date}.json`,
+          message: JSON.stringify(payload, null, 2),
+        },
+        { dialogTitle: 'Esporta dati giornata' },
+      );
+    } catch (e: any) {
+      Alert.alert('Errore export', e.message ?? 'Impossibile condividere il file.');
+    }
   }
 
   // ── lifecycle ─────────────────────────────────────────────
@@ -688,6 +704,8 @@ export default function App() {
         startAcc(state.mode);
         startPolling();
       }
+      // Rileva sempre la città al primo avvio
+      updateCity();
     })();
 
     const sub = AppState.addEventListener('change', (_next: AppStateStatus) => {
