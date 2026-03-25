@@ -3,6 +3,8 @@
 // ============================================================
 
 import { registerRootComponent } from 'expo';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
@@ -11,7 +13,6 @@ import {
   ScrollView,
   StyleSheet,
   Alert,
-  Share,
   StatusBar,
   SafeAreaView,
   AppState,
@@ -546,18 +547,19 @@ export default function App() {
   // ── polling UI ────────────────────────────────────────────
   async function updateCity(): Promise<void> {
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
+      const { status } = await Location.getForegroundPermissionsAsync();
       if (status !== 'granted') return;
-      const pos = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
+      // getLastKnownPositionAsync è istantanea, non richiede GPS attivo
+      const pos = await Location.getLastKnownPositionAsync({ maxAge: 300_000 });
+      if (!pos) return;
       const res = await Location.reverseGeocodeAsync({
         latitude: pos.coords.latitude,
         longitude: pos.coords.longitude,
       });
       if (res.length > 0) {
         const r = res[0];
-        setCurrentCity(r.city || r.subregion || r.region || '—');
+        const city = r.city || r.subregion || r.region;
+        if (city) setCurrentCity(city);
       }
     } catch { /* ignora */ }
   }
@@ -653,7 +655,7 @@ export default function App() {
   async function exportDay(): Promise<void> {
     const day = await loadDay();
     if (day.trips.length === 0 && day.stops.length === 0) {
-      Alert.alert('Nessun dato', 'Avvia il tracking prima di esportare.');
+      Alert.alert('Nessun dato', 'Avvia e ferma il tracking prima di esportare.');
       return;
     }
     const totalKm = day.trips.reduce((s, t) => s + t.distanceMeters, 0) / 1000;
@@ -677,15 +679,23 @@ export default function App() {
     };
 
     try {
-      await Share.share(
-        {
-          title: `nexusflow_${day.date}.json`,
-          message: JSON.stringify(payload, null, 2),
-        },
-        { dialogTitle: 'Esporta dati giornata' },
-      );
+      const fileName = `nexusflow_${day.date}.json`;
+      const fileUri = FileSystem.cacheDirectory + fileName;
+      await FileSystem.writeAsStringAsync(fileUri, JSON.stringify(payload, null, 2), {
+        encoding: FileSystem.EncodingType.UTF8,
+      });
+      const canShare = await Sharing.isAvailableAsync();
+      if (canShare) {
+        await Sharing.shareAsync(fileUri, {
+          mimeType: 'application/json',
+          dialogTitle: 'Salva o condividi la giornata',
+          UTI: 'public.json',
+        });
+      } else {
+        Alert.alert('Errore', 'Condivisione non disponibile su questo dispositivo.');
+      }
     } catch (e: any) {
-      Alert.alert('Errore export', e.message ?? 'Impossibile condividere il file.');
+      Alert.alert('Errore export', e.message ?? 'Impossibile esportare il file.');
     }
   }
 
