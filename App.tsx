@@ -456,6 +456,7 @@ export default function App() {
   const [dayStops, setDayStops]           = useState<StopRecord[]>([]);
   const [dayTrips, setDayTrips]           = useState<TripRecord[]>([]);
   const [lastSync, setLastSync]           = useState<number | null>(null);
+  const [currentCity, setCurrentCity]     = useState<string>('—');
 
   // ── refs ─────────────────────────────────────────────────
   const pollRef   = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -543,6 +544,19 @@ export default function App() {
   }
 
   // ── polling UI ────────────────────────────────────────────
+  async function updateCity(): Promise<void> {
+    try {
+      const pos = await Location.getLastKnownPositionAsync();
+      if (pos) {
+        const res = await Location.reverseGeocodeAsync({
+          latitude: pos.coords.latitude,
+          longitude: pos.coords.longitude,
+        });
+        if (res.length > 0 && res[0].city) setCurrentCity(res[0].city);
+      }
+    } catch { /* ignora */ }
+  }
+
   function startPolling(): void {
     if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(async () => {
@@ -556,6 +570,7 @@ export default function App() {
       setDayTrips([...day.trips].reverse());
       setLastSync(Date.now());
       modeRef.current = state.mode;
+      await updateCity();
     }, UI_POLL_MS);
   }
 
@@ -577,6 +592,7 @@ export default function App() {
     startAcc('city');
     modeRef.current = 'city';
     setIsTracking(true);
+    updateCity();
     setMode('city');
     setVehicleState('stopped');
     setSpeedKmh(0);
@@ -644,7 +660,10 @@ export default function App() {
         totaleTragitti: day.trips.length,
         tempoSosteSec: totalStopSec,
       },
-      tragitti: day.trips,
+      tragitti: day.trips.map(t => ({
+        ...t,
+        mapLink: `https://www.google.com/maps/dir/${t.startLat},${t.startLng}/${t.endLat},${t.endLng}`,
+      })),
       soste: day.stops,
     };
 
@@ -704,9 +723,12 @@ export default function App() {
       {/* HEADER */}
       <View style={s.header}>
         <Text style={s.logo}>NEXUS FLOW</Text>
-        <Text style={s.sync}>
-          {lastSync ? `↺ ${fmtTime(lastSync)}` : '—'}
-        </Text>
+        <View style={{ alignItems: 'flex-end' }}>
+          <Text style={s.cityLabel}>📍 {currentCity}</Text>
+          <Text style={s.sync}>
+            {lastSync ? `↺ ${fmtTime(lastSync)}` : '—'}
+          </Text>
+        </View>
       </View>
 
       <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
@@ -770,11 +792,12 @@ export default function App() {
         </TouchableOpacity>
 
         {/* EXPORT */}
-        {hasData && (
-          <TouchableOpacity style={s.exportBtn} onPress={exportDay}>
-            <Text style={s.exportTxt}>↑  Esporta giornata JSON</Text>
-          </TouchableOpacity>
-        )}
+        <TouchableOpacity
+          style={[s.exportBtn, !hasData && s.exportBtnDisabled]}
+          onPress={hasData ? exportDay : undefined}
+        >
+          <Text style={s.exportTxt}>↑  Esporta giornata (JSON + link mappa)</Text>
+        </TouchableOpacity>
 
         {/* EVENTI */}
         {events.length > 0 && (
@@ -935,13 +958,22 @@ const s = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#0A0A0A',
     borderWidth: 1,
+    borderColor: '#00FF88',
+  },
+  exportBtnDisabled: {
     borderColor: '#222',
+    opacity: 0.4,
   },
   exportTxt: {
-    color: '#555',
+    color: '#00FF88',
     fontSize: 13,
     fontWeight: '600',
     letterSpacing: 1,
+  },
+  cityLabel: {
+    color: '#aaa',
+    fontSize: 12,
+    fontWeight: '500',
   },
   evRow: {
     flexDirection: 'row',
