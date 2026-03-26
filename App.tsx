@@ -546,11 +546,23 @@ export default function App() {
   // ── polling UI ────────────────────────────────────────────
   async function updateCity(): Promise<void> {
     try {
-      const { status } = await Location.getForegroundPermissionsAsync();
+      // Richiedi permesso se non ancora concesso
+      let { status } = await Location.getForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        const req = await Location.requestForegroundPermissionsAsync();
+        status = req.status;
+      }
       if (status !== 'granted') return;
-      // getLastKnownPositionAsync è istantanea, non richiede GPS attivo
-      const pos = await Location.getLastKnownPositionAsync({ maxAge: 300_000 });
+
+      // Prima prova cache (veloce) — se null prendi posizione reale con bassa precisione
+      let pos = await Location.getLastKnownPositionAsync();
+      if (!pos) {
+        pos = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Low,
+        });
+      }
       if (!pos) return;
+
       const res = await Location.reverseGeocodeAsync({
         latitude: pos.coords.latitude,
         longitude: pos.coords.longitude,
@@ -565,6 +577,8 @@ export default function App() {
 
   function startPolling(): void {
     if (pollRef.current) clearInterval(pollRef.current);
+    // Contatore per aggiornare la città ogni 30s invece che ogni 2s
+    let cityTick = 0;
     pollRef.current = setInterval(async () => {
       const [state, day] = await Promise.all([loadState(), loadDay()]);
       setMode(state.mode);
@@ -576,7 +590,12 @@ export default function App() {
       setDayTrips([...day.trips].reverse());
       setLastSync(Date.now());
       modeRef.current = state.mode;
-      await updateCity();
+      // Aggiorna città ogni 15 cicli (~30 secondi) per non sprecare batteria
+      cityTick++;
+      if (cityTick >= 15) {
+        cityTick = 0;
+        updateCity();
+      }
     }, UI_POLL_MS);
   }
 
@@ -702,6 +721,8 @@ export default function App() {
         modeRef.current = state.mode;
         setDayStops([...day.stops].reverse());
         setDayTrips([...day.trips].reverse());
+        // Riavvia GPS — mancava questo, il tracking non riprendeva dopo riavvio app
+        await startGps(state.mode).catch(() => {});
         startAcc(state.mode);
         startPolling();
       }
@@ -813,9 +834,11 @@ export default function App() {
         {/* EXPORT */}
         <TouchableOpacity
           style={[s.exportBtn, !hasData && s.exportBtnDisabled]}
-          onPress={hasData ? exportDay : undefined}
+          onPress={exportDay}
         >
-          <Text style={s.exportTxt}>↑  Esporta giornata (JSON + link mappa)</Text>
+          <Text style={[s.exportTxt, !hasData && { color: '#555' }]}>
+            ↑  Esporta giornata (JSON + link mappa)
+          </Text>
         </TouchableOpacity>
 
         {/* EVENTI */}
