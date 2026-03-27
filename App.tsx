@@ -1,5 +1,5 @@
 // ============================================================
-// NEXUS FLOW — Fase 1: App di Tracking Giornata
+// NEXUS FLOW — GPS Tracker Professionale per Camionisti
 // ============================================================
 
 import { registerRootComponent } from 'expo';
@@ -23,1023 +23,852 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Accelerometer } from 'expo-sensors';
 
 // ============================================================
-// COSTANTI CONFIGURABILI — modifica qui per calibrare
+// PALETTE COLORI
 // ============================================================
-const STOP_SPEED_KMH        = 3;      // km/h sotto cui il veicolo è fermo
-const STOP_CONFIRM_SEC      = 60;     // secondi per confermare una sosta reale
-const STOP_IGNORE_SEC       = 30;     // soste più brevi vengono ignorate (semafori)
-const MIN_DIST_METERS       = 100;    // distanza minima per registrare un tragitto
-const TRAVEL_SPEED_KMH      = 15;     // km/h sopra cui si attiva modalità VIAGGIO
-const REST_INACTIVITY_MIN   = 5;      // minuti fermi per passare in modalità RIPOSO
-
-const GPS_INTERVAL_CITY_MS  = 15_000; // intervallo GPS in modalità CITTÀ (ms)
-const GPS_INTERVAL_TRAVEL_MS = 5_000; // intervallo GPS in modalità VIAGGIO (ms)
-const GPS_DISTANCE_CITY_M   = 10;     // distanza minima aggiornamento CITTÀ (m)
-const GPS_DISTANCE_TRAVEL_M = 5;      // distanza minima aggiornamento VIAGGIO (m)
-const GPS_ACCURACY_LIMIT_M  = 50;     // ignora letture meno accurate di questo valore
-
-const ACC_HZ_REST           = 1;      // frequenza accelerometro in RIPOSO (Hz)
-const ACC_HZ_CITY           = 5;      // frequenza accelerometro in CITTÀ (Hz)
-const ACC_HZ_TRAVEL         = 50;     // frequenza accelerometro in VIAGGIO (Hz)
-const ACC_VARIANCE_THRESHOLD = 0.008; // soglia varianza per rilevare movimento in RIPOSO
-const ACC_VARIANCE_WINDOW   = 20;     // campioni per il calcolo della varianza
-
-const UI_POLL_MS            = 2_000;  // intervallo polling AsyncStorage → UI (ms)
+const C = {
+  bg:           '#0A0E1A',
+  surface:      '#111827',
+  surfaceLight: '#1C2537',
+  border:       '#252F42',
+  borderLight:  '#2E3B52',
+  green:        '#22C55E',
+  greenDim:     '#16A34A',
+  orange:       '#F59E0B',
+  orangeDim:    '#B45309',
+  red:          '#EF4444',
+  redDim:       '#B91C1C',
+  blue:         '#3B82F6',
+  blueDim:      '#1D4ED8',
+  text:         '#F1F5F9',
+  textSub:      '#94A3B8',
+  textMuted:    '#475569',
+  white:        '#FFFFFF',
+};
 
 // ============================================================
-// CHIAVI STORAGE & NOME TASK
+// COSTANTI CONFIGURABILI
 // ============================================================
-const KEY_STATE   = '@nf_state_v1';
-const KEY_DAY     = '@nf_day_v1';
-const TASK_BG_LOC = 'nf-background-location';
+const STOP_SPEED_KMH         = 3;
+const STOP_CONFIRM_SEC       = 60;
+const STOP_IGNORE_SEC        = 30;
+const MIN_DIST_METERS        = 80;
+const TRAVEL_SPEED_KMH       = 15;
+
+const GPS_INTERVAL_CITY_MS   = 12_000;
+const GPS_INTERVAL_TRAVEL_MS = 4_000;
+const GPS_DISTANCE_CITY_M    = 10;
+const GPS_DISTANCE_TRAVEL_M  = 5;
+const GPS_ACCURACY_LIMIT_M   = 50;
+
+const ACC_HZ_REST            = 1;
+const ACC_HZ_CITY            = 5;
+const ACC_HZ_TRAVEL          = 50;
+const ACC_VARIANCE_THRESHOLD = 0.008;
+const ACC_VARIANCE_WINDOW    = 20;
+
+const UI_POLL_MS             = 2_000;
+
+// Carburante (camion medio)
+const FUEL_L_PER_100KM       = 30;
+const FUEL_PRICE_EUR         = 1.85;
+
+// Limiti EU conducente
+const SPEED_LIMIT_KMH        = 90;
+const EU_MAX_DRIVE_SEC       = 4.5 * 3600;   // 4h 30m
+const EU_WARN_BEFORE_SEC     = 30 * 60;       // avvisa 30m prima
+
+// ============================================================
+// CHIAVI STORAGE & TASK
+// ============================================================
+const KEY_STATE = '@nf_state_v3';
+const KEY_DAY   = '@nf_day_v3';
+const BG_TASK   = 'nf-background-location';
 
 // ============================================================
 // TIPI
 // ============================================================
-type VehicleState = 'stopped' | 'slow' | 'moving';
-type AppMode      = 'rest' | 'city' | 'travel';
-
-interface StopRecord {
-  id: string;
-  startTs: number;
-  endTs: number;
-  lat: number;
-  lng: number;
-  address: string;
-  postalCode: string;
-  durationSec: number;
-}
-
-interface TripRecord {
-  id: string;
-  startTs: number;
-  endTs: number;
-  startLat: number;
-  startLng: number;
-  endLat: number;
-  endLng: number;
-  distanceMeters: number;
-  avgSpeedKmh: number;
-  maxSpeedKmh: number;
-}
+type VehicleMode = 'rest' | 'city' | 'travel';
 
 interface TrackingState {
   isTracking: boolean;
-  mode: AppMode;
-  vehicleState: VehicleState;
-  slowSinceTs: number | null;
-  slowLat: number | null;
-  slowLng: number | null;
-  tripId: string | null;
+  mode: VehicleMode;
+  sessionStartTs: number | null;
   tripStartTs: number | null;
   tripStartLat: number | null;
-  tripStartLng: number | null;
-  tripLastLat: number | null;
-  tripLastLng: number | null;
-  tripDistanceM: number;
+  tripStartLon: number | null;
+  tripDistM: number;
   tripMaxSpeedKmh: number;
-  tripSpeedSum: number;
-  tripSpeedCount: number;
   lastLat: number | null;
-  lastLng: number | null;
+  lastLon: number | null;
+  lastTs: number | null;
   lastSpeedKmh: number;
+  stopStartTs: number | null;
+  continuousDriveStartTs: number | null;
+  totalDriveSecToday: number;
+  cityPollCount: number;
+}
+
+interface TripEvent {
+  type: 'trip' | 'stop';
+  startTs: number;
+  endTs: number;
+  durationSec: number;
+  distKm?: number;
+  maxSpeedKmh?: number;
+  startCity?: string;
+  endCity?: string;
+  fuelL?: number;
+  fuelEur?: number;
 }
 
 interface DayData {
   date: string;
-  stops: StopRecord[];
-  trips: TripRecord[];
+  totalKm: number;
+  totalDriveSecToday: number;
+  events: TripEvent[];
 }
+
+const DEFAULT_STATE: TrackingState = {
+  isTracking: false,
+  mode: 'rest',
+  sessionStartTs: null,
+  tripStartTs: null,
+  tripStartLat: null,
+  tripStartLon: null,
+  tripDistM: 0,
+  tripMaxSpeedKmh: 0,
+  lastLat: null,
+  lastLon: null,
+  lastTs: null,
+  lastSpeedKmh: 0,
+  stopStartTs: null,
+  continuousDriveStartTs: null,
+  totalDriveSecToday: 0,
+  cityPollCount: 0,
+};
 
 // ============================================================
-// UTILITY
+// UTILITÀ
 // ============================================================
-function uid(): string {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-}
-
-function todayISO(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-/** Distanza in metri tra due coordinate GPS (formula di Haversine) */
-function haversineM(lat1: number, lng1: number, lat2: number, lng2: number): number {
-  const R = 6_371_000;
-  const toRad = (d: number) => (d * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLng = toRad(lng2 - lng1);
+function haversineM(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371000;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
   const a =
     Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) ** 2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-/** Varianza di un array di numeri */
-function calcVariance(arr: number[]): number {
-  if (arr.length < 2) return 0;
-  const mean = arr.reduce((a, b) => a + b, 0) / arr.length;
-  return arr.reduce((s, x) => s + (x - mean) ** 2, 0) / arr.length;
-}
-
-function fmtDuration(sec: number): string {
-  if (sec < 60) return `${sec}s`;
-  if (sec < 3600) return `${Math.floor(sec / 60)}m ${sec % 60}s`;
-  const h = Math.floor(sec / 3600);
-  const m = Math.floor((sec % 3600) / 60);
-  return `${h}h ${m}m`;
+function todayStr(): string {
+  return new Date().toISOString().slice(0, 10);
 }
 
 function fmtTime(ts: number): string {
   return new Date(ts).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
 }
 
-function fmtDist(m: number): string {
-  return m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`;
+function fmtDuration(sec: number): string {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = Math.floor(sec % 60);
+  if (h > 0) return `${h}h ${m.toString().padStart(2, '0')}m`;
+  return `${m}m ${s.toString().padStart(2, '0')}s`;
 }
 
-// ============================================================
-// STORAGE HELPERS
-// ============================================================
-function defaultState(): TrackingState {
-  return {
-    isTracking: false,
-    mode: 'city',
-    vehicleState: 'stopped',
-    slowSinceTs: null,
-    slowLat: null,
-    slowLng: null,
-    tripId: null,
-    tripStartTs: null,
-    tripStartLat: null,
-    tripStartLng: null,
-    tripLastLat: null,
-    tripLastLng: null,
-    tripDistanceM: 0,
-    tripMaxSpeedKmh: 0,
-    tripSpeedSum: 0,
-    tripSpeedCount: 0,
-    lastLat: null,
-    lastLng: null,
-    lastSpeedKmh: 0,
-  };
+function fmtClock(): string {
+  return new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
-function defaultDay(): DayData {
-  return { date: todayISO(), stops: [], trips: [] };
+function fuelCalc(km: number): { l: number; eur: number } {
+  const l = (km / 100) * FUEL_L_PER_100KM;
+  return { l: Math.round(l * 10) / 10, eur: Math.round(l * FUEL_PRICE_EUR * 100) / 100 };
 }
 
 async function loadState(): Promise<TrackingState> {
   try {
-    const raw = await AsyncStorage.getItem(KEY_STATE);
-    return raw ? (JSON.parse(raw) as TrackingState) : defaultState();
-  } catch {
-    return defaultState();
-  }
+    const s = await AsyncStorage.getItem(KEY_STATE);
+    if (s) return { ...DEFAULT_STATE, ...JSON.parse(s) };
+  } catch {}
+  return { ...DEFAULT_STATE };
 }
 
 async function saveState(s: TrackingState): Promise<void> {
-  await AsyncStorage.setItem(KEY_STATE, JSON.stringify(s));
+  try { await AsyncStorage.setItem(KEY_STATE, JSON.stringify(s)); } catch {}
 }
 
 async function loadDay(): Promise<DayData> {
   try {
     const raw = await AsyncStorage.getItem(KEY_DAY);
-    if (!raw) return defaultDay();
-    const d = JSON.parse(raw) as DayData;
-    return d.date === todayISO() ? d : defaultDay();
-  } catch {
-    return defaultDay();
-  }
+    if (raw) {
+      const d: DayData = JSON.parse(raw);
+      if (d.date === todayStr()) return d;
+    }
+  } catch {}
+  return { date: todayStr(), totalKm: 0, totalDriveSecToday: 0, events: [] };
 }
 
 async function saveDay(d: DayData): Promise<void> {
-  await AsyncStorage.setItem(KEY_DAY, JSON.stringify(d));
+  try { await AsyncStorage.setItem(KEY_DAY, JSON.stringify(d)); } catch {}
 }
 
 // ============================================================
-// REVERSE GEOCODING
+// TASK BACKGROUND GPS
 // ============================================================
-async function reverseGeocode(lat: number, lng: number): Promise<{ address: string; postalCode: string }> {
-  try {
-    const res = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lng });
-    if (res.length > 0) {
-      const r = res[0];
-      const parts = [r.street, r.streetNumber, r.city].filter(Boolean);
-      return {
-        address: parts.join(', ') || r.city || 'Posizione sconosciuta',
-        postalCode: r.postalCode ?? '',
-      };
-    }
-  } catch {
-    /* ignora errori di geocoding */
-  }
-  return { address: 'Posizione sconosciuta', postalCode: '' };
-}
+TaskManager.defineTask(BG_TASK, async ({ data, error }: any) => {
+  if (error || !data?.locations?.length) return;
+  const loc: Location.LocationObject = data.locations[data.locations.length - 1];
+  if (loc.coords.accuracy !== null && loc.coords.accuracy > GPS_ACCURACY_LIMIT_M) return;
 
-// ============================================================
-// ELABORAZIONE POSIZIONE — usata sia dal task BG che dal foreground
-// ============================================================
-async function processLocation(loc: Location.LocationObject): Promise<void> {
   const state = await loadState();
   if (!state.isTracking) return;
 
-  const day = await loadDay();
-  const { latitude: lat, longitude: lng, speed, accuracy } = loc.coords;
-  const ts = loc.timestamp;
-  const speedKmh = Math.max(0, (speed ?? 0) * 3.6);
+  const now = Date.now();
+  const lat = loc.coords.latitude;
+  const lon = loc.coords.longitude;
+  const speedMs = loc.coords.speed ?? 0;
+  const speedKmh = Math.max(0, speedMs * 3.6);
 
-  // Scarta letture troppo imprecise
-  if ((accuracy ?? 999) > GPS_ACCURACY_LIMIT_M) {
-    return;
-  }
+  let s = { ...state, lastSpeedKmh: speedKmh };
 
-  // Aggiorna ultima posizione nota
-  state.lastLat = lat;
-  state.lastLng = lng;
-  state.lastSpeedKmh = speedKmh;
+  if (s.lastLat !== null && s.lastLon !== null && s.lastTs !== null) {
+    const dist = haversineM(s.lastLat, s.lastLon, lat, lon);
+    const elapsed = (now - s.lastTs) / 1000;
 
-  // Aggiorna modalità in base alla velocità
-  if (speedKmh >= TRAVEL_SPEED_KMH) state.mode = 'travel';
-  else if (speedKmh >= STOP_SPEED_KMH) state.mode = 'city';
+    if (speedKmh > STOP_SPEED_KMH) {
+      // In movimento
+      if (s.mode !== 'travel') s.mode = speedKmh >= TRAVEL_SPEED_KMH ? 'travel' : 'city';
+      s.stopStartTs = null;
 
-  // ── STATE MACHINE VEICOLO ───────────────────────────────
-  if (speedKmh < STOP_SPEED_KMH) {
-    // Veicolo lento / fermo
-    if (state.vehicleState === 'moving') {
-      state.vehicleState = 'slow';
-      state.slowSinceTs = ts;
-      state.slowLat = lat;
-      state.slowLng = lng;
-    } else if (state.vehicleState === 'slow') {
-      const slowSec = (ts - (state.slowSinceTs ?? ts)) / 1000;
-
-      if (slowSec >= STOP_CONFIRM_SEC) {
-        state.vehicleState = 'stopped';
-
-        // Chiudi il tragitto corrente se abbastanza lungo
-        if (state.tripId && state.tripDistanceM >= MIN_DIST_METERS) {
-          const avg = state.tripSpeedCount > 0
-            ? state.tripSpeedSum / state.tripSpeedCount
-            : 0;
-          day.trips.push({
-            id: state.tripId,
-            startTs: state.tripStartTs!,
-            endTs: ts,
-            startLat: state.tripStartLat!,
-            startLng: state.tripStartLng!,
-            endLat: lat,
-            endLng: lng,
-            distanceMeters: state.tripDistanceM,
-            avgSpeedKmh: Math.round(avg),
-            maxSpeedKmh: Math.round(state.tripMaxSpeedKmh),
-          });
-        }
-        // Reset tragitto
-        state.tripId = null;
-        state.tripStartTs = null;
-        state.tripStartLat = null;
-        state.tripStartLng = null;
-        state.tripLastLat = null;
-        state.tripLastLng = null;
-        state.tripDistanceM = 0;
-        state.tripMaxSpeedKmh = 0;
-        state.tripSpeedSum = 0;
-        state.tripSpeedCount = 0;
-
-        // Registra la sosta
-        const stopLat = state.slowLat ?? lat;
-        const stopLng = state.slowLng ?? lng;
-        const stopStart = state.slowSinceTs ?? ts;
-        const alreadySaved = day.stops.some(s => s.startTs === stopStart);
-        if (!alreadySaved) {
-          const { address, postalCode } = await reverseGeocode(stopLat, stopLng);
-          day.stops.push({
-            id: uid(),
-            startTs: stopStart,
-            endTs: ts,
-            lat: stopLat,
-            lng: stopLng,
-            address,
-            postalCode,
-            durationSec: Math.round((ts - stopStart) / 1000),
-          });
-        }
-
-        // Passa a RIPOSO dopo REST_INACTIVITY_MIN
-        if ((ts - (state.slowSinceTs ?? ts)) / 60000 >= REST_INACTIVITY_MIN) {
-          state.mode = 'rest';
-        }
+      if (s.tripStartTs === null) {
+        s.tripStartTs = now;
+        s.tripStartLat = lat;
+        s.tripStartLon = lon;
+        s.tripDistM = 0;
+        s.tripMaxSpeedKmh = 0;
+        if (s.continuousDriveStartTs === null) s.continuousDriveStartTs = now;
       }
-    }
-    // vehicleState === 'stopped' → nessuna azione
-  } else {
-    // Veicolo in movimento
-    if (state.vehicleState === 'slow') {
-      const slowSec = (ts - (state.slowSinceTs ?? ts)) / 1000;
-      if (slowSec < STOP_IGNORE_SEC) {
-        // Era solo un semaforo, ignora
-        state.vehicleState = 'moving';
-        state.slowSinceTs = null;
-        state.slowLat = null;
-        state.slowLng = null;
-      } else {
-        // Era una sosta reale, salva e riparti
-        const stopLat = state.slowLat ?? lat;
-        const stopLng = state.slowLng ?? lng;
-        const stopStart = state.slowSinceTs ?? ts;
-        const alreadySaved = day.stops.some(s => s.startTs === stopStart);
-        if (!alreadySaved) {
-          const { address, postalCode } = await reverseGeocode(stopLat, stopLng);
-          day.stops.push({
-            id: uid(),
-            startTs: stopStart,
-            endTs: ts,
-            lat: stopLat,
-            lng: stopLng,
-            address,
-            postalCode,
-            durationSec: Math.round((ts - stopStart) / 1000),
-          });
+      s.tripDistM += dist;
+      if (speedKmh > s.tripMaxSpeedKmh) s.tripMaxSpeedKmh = speedKmh;
+
+      // Accumula tempo di guida
+      s.totalDriveSecToday += elapsed;
+
+    } else {
+      // Fermo
+      if (s.stopStartTs === null) s.stopStartTs = now;
+      const stopDur = (now - s.stopStartTs) / 1000;
+
+      if (stopDur >= STOP_CONFIRM_SEC && s.tripStartTs !== null) {
+        // Sosta confermata — chiudi il tragitto corrente
+        if (s.tripDistM >= MIN_DIST_METERS) {
+          const day = await loadDay();
+          const tripKm = s.tripDistM / 1000;
+          const fuel = fuelCalc(tripKm);
+          const driveSec = (s.stopStartTs - s.tripStartTs) / 1000;
+          const ev: TripEvent = {
+            type: 'trip',
+            startTs: s.tripStartTs,
+            endTs: s.stopStartTs,
+            durationSec: driveSec,
+            distKm: Math.round(tripKm * 10) / 10,
+            maxSpeedKmh: Math.round(s.tripMaxSpeedKmh),
+            fuelL: fuel.l,
+            fuelEur: fuel.eur,
+          };
+          day.events.push(ev);
+          day.totalKm = Math.round((day.totalKm + tripKm) * 10) / 10;
+          day.totalDriveSecToday = s.totalDriveSecToday;
+          await saveDay(day);
         }
-        state.vehicleState = 'moving';
-        state.slowSinceTs = null;
-        state.slowLat = null;
-        state.slowLng = null;
+        s.tripStartTs = null;
+        s.tripStartLat = null;
+        s.tripStartLon = null;
+        s.tripDistM = 0;
+        s.tripMaxSpeedKmh = 0;
+        s.continuousDriveStartTs = null;
+        s.mode = 'city';
       }
-    } else if (state.vehicleState === 'stopped') {
-      state.vehicleState = 'moving';
-      state.mode = 'city';
-      state.slowSinceTs = null;
-    }
 
-    // Aggiorna tragitto corrente
-    if (state.vehicleState === 'moving') {
-      if (!state.tripId) {
-        state.tripId = uid();
-        state.tripStartTs = ts;
-        state.tripStartLat = lat;
-        state.tripStartLng = lng;
-        state.tripLastLat = lat;
-        state.tripLastLng = lng;
-        state.tripDistanceM = 0;
-        state.tripMaxSpeedKmh = speedKmh;
-        state.tripSpeedSum = speedKmh;
-        state.tripSpeedCount = 1;
-      } else {
-        if (state.tripLastLat !== null && state.tripLastLng !== null) {
-          const seg = haversineM(state.tripLastLat, state.tripLastLng, lat, lng);
-          // Sanity check: max ~280m in 5 secondi a 200 km/h
-          if (seg < 300) state.tripDistanceM += seg;
-        }
-        state.tripLastLat = lat;
-        state.tripLastLng = lng;
-        if (speedKmh > state.tripMaxSpeedKmh) state.tripMaxSpeedKmh = speedKmh;
-        state.tripSpeedSum += speedKmh;
-        state.tripSpeedCount++;
-      }
+      if (stopDur >= REST_INACTIVITY_MIN * 60) s.mode = 'rest';
     }
   }
 
-  await saveState(state);
-  await saveDay(day);
-}
+  s.lastLat = lat;
+  s.lastLon = lon;
+  s.lastTs = now;
+  s.cityPollCount = (s.cityPollCount || 0) + 1;
 
-// ============================================================
-// TASK BACKGROUND — deve essere definito a livello di modulo
-// ============================================================
-TaskManager.defineTask(TASK_BG_LOC, async ({ data, error }) => {
-  if (error) {
-    console.error('[NF BG]', error.message);
-    return;
-  }
-  if (data) {
-    const { locations } = data as { locations: Location.LocationObject[] };
-    for (const loc of locations) {
-      await processLocation(loc);
-    }
-  }
+  await saveState(s);
 });
 
+const REST_INACTIVITY_MIN = 5;
+
 // ============================================================
-// OPZIONI GPS PER MODALITÀ
+// FUNZIONI GPS
 // ============================================================
-function gpsOptions(mode: AppMode): Location.LocationTaskOptions {
-  const isTravel = mode === 'travel';
-  return {
-    accuracy: Location.Accuracy.BestForNavigation,
-    timeInterval: isTravel ? GPS_INTERVAL_TRAVEL_MS : GPS_INTERVAL_CITY_MS,
-    distanceInterval: isTravel ? GPS_DISTANCE_TRAVEL_M : GPS_DISTANCE_CITY_M,
-    activityType: Location.ActivityType.AutomotiveNavigation,
-    showsBackgroundLocationIndicator: true,
-    pausesUpdatesAutomatically: false,
-    deferredUpdatesInterval: 0,
-    deferredUpdatesDistance: 0,
+async function startGps(mode: VehicleMode): Promise<void> {
+  const { status: fg } = await Location.requestForegroundPermissionsAsync();
+  if (fg !== 'granted') throw new Error('Permesso posizione negato');
+  const { status: bg } = await Location.requestBackgroundPermissionsAsync();
+  if (bg !== 'granted') throw new Error('Permesso posizione background negato');
+
+  const isRunning = await Location.hasStartedLocationUpdatesAsync(BG_TASK).catch(() => false);
+  if (isRunning) await Location.stopLocationUpdatesAsync(BG_TASK).catch(() => {});
+
+  const travel = mode === 'travel';
+  await Location.startLocationUpdatesAsync(BG_TASK, {
+    accuracy: travel ? Location.Accuracy.BestForNavigation : Location.Accuracy.High,
+    timeInterval: travel ? GPS_INTERVAL_TRAVEL_MS : GPS_INTERVAL_CITY_MS,
+    distanceInterval: travel ? GPS_DISTANCE_TRAVEL_M : GPS_DISTANCE_CITY_M,
     foregroundService: {
-      notificationTitle: 'Nexus Flow',
-      notificationBody: isTravel ? '🚛 Tracciamento viaggio attivo' : '🏙 Tracciamento città attivo',
-      notificationColor: '#00FF88',
+      notificationTitle: 'Nexus Flow — Tracking Attivo',
+      notificationBody: 'Registrazione percorso in corso',
+      notificationColor: '#22C55E',
     },
-  };
+    pausesUpdatesAutomatically: false,
+    showsBackgroundLocationIndicator: true,
+  });
+}
+
+async function stopGps(): Promise<void> {
+  const isRunning = await Location.hasStartedLocationUpdatesAsync(BG_TASK).catch(() => false);
+  if (isRunning) await Location.stopLocationUpdatesAsync(BG_TASK).catch(() => {});
 }
 
 // ============================================================
-// APP COMPONENT
+// COMPONENTE PRINCIPALE
 // ============================================================
-export default function App() {
-  // ── UI state ─────────────────────────────────────────────
-  const [isTracking, setIsTracking]       = useState(false);
-  const [mode, setMode]                   = useState<AppMode>('city');
-  const [vehicleState, setVehicleState]   = useState<VehicleState>('stopped');
-  const [speedKmh, setSpeedKmh]           = useState(0);
-  const [tripDistM, setTripDistM]         = useState(0);
-  const [tripMaxSpd, setTripMaxSpd]       = useState(0);
-  const [dayStops, setDayStops]           = useState<StopRecord[]>([]);
-  const [dayTrips, setDayTrips]           = useState<TripRecord[]>([]);
-  const [lastSync, setLastSync]           = useState<number | null>(null);
-  const [currentCity, setCurrentCity]     = useState<string>('—');
+function App(): React.JSX.Element {
+  const [state, setState] = useState<TrackingState>({ ...DEFAULT_STATE });
+  const [day, setDay] = useState<DayData>({ date: todayStr(), totalKm: 0, totalDriveSecToday: 0, events: [] });
+  const [currentCity, setCurrentCity] = useState<string>('—');
+  const [clock, setClock] = useState<string>(fmtClock());
+  const [loading, setLoading] = useState<boolean>(true);
 
-  // ── refs ─────────────────────────────────────────────────
-  const pollRef   = useRef<ReturnType<typeof setInterval> | null>(null);
-  const accRef    = useRef<ReturnType<typeof Accelerometer.addListener> | null>(null);
-  const accBuf    = useRef<number[]>([]);
-  const modeRef   = useRef<AppMode>('city'); // ref per accesso in closure accelerometro
+  const appState = useRef<AppStateStatus>(AppState.currentState);
+  const accSubscription = useRef<any>(null);
+  const accSamples = useRef<number[]>([]);
 
-  // ── permissions ──────────────────────────────────────────
-  async function requestPermissions(): Promise<boolean> {
-    const { status: fg } = await Location.requestForegroundPermissionsAsync();
-    if (fg !== 'granted') {
-      Alert.alert(
-        'GPS non disponibile',
-        'Concedi l\'accesso alla posizione per usare Nexus Flow.',
-      );
-      return false;
-    }
-    const { status: bg } = await Location.requestBackgroundPermissionsAsync();
-    if (bg !== 'granted') {
-      Alert.alert(
-        'Background GPS',
-        'Per il tracciamento continuo con schermo spento, vai in Impostazioni → Privacy → Posizione → Nexus Flow → "Sempre".',
-        [{ text: 'OK' }],
-      );
-      // Continuiamo comunque, funzionerà in foreground
-    }
-    return true;
-  }
+  // ── Tick dell'orologio ─────────────────────────────────────
+  useEffect(() => {
+    const id = setInterval(() => setClock(fmtClock()), 1000);
+    return () => clearInterval(id);
+  }, []);
 
-  // ── avvio GPS task ────────────────────────────────────────
-  async function startGps(m: AppMode): Promise<void> {
-    const running = await Location.hasStartedLocationUpdatesAsync(TASK_BG_LOC).catch(() => false);
-    if (running) await Location.stopLocationUpdatesAsync(TASK_BG_LOC).catch(() => {});
-    await Location.startLocationUpdatesAsync(TASK_BG_LOC, gpsOptions(m));
-  }
+  // ── Inizializzazione & polling ─────────────────────────────
+  useEffect(() => {
+    let pollId: ReturnType<typeof setInterval>;
 
-  async function stopGps(): Promise<void> {
-    const running = await Location.hasStartedLocationUpdatesAsync(TASK_BG_LOC).catch(() => false);
-    if (running) await Location.stopLocationUpdatesAsync(TASK_BG_LOC).catch(() => {});
-  }
+    (async () => {
+      const s = await loadState();
+      const d = await loadDay();
+      setState(s);
+      setDay(d);
+      setLoading(false);
 
-  // ── accelerometro ─────────────────────────────────────────
-  function startAcc(m: AppMode): void {
-    accRef.current?.remove();
-    accBuf.current = [];
-    Accelerometer.setUpdateInterval(Math.round(1000 / (m === 'travel' ? ACC_HZ_TRAVEL : m === 'city' ? ACC_HZ_CITY : ACC_HZ_REST)));
-    accRef.current = Accelerometer.addListener(({ x, y, z }) => {
-      const mag = Math.sqrt(x * x + y * y + z * z);
-      accBuf.current.push(mag);
-      if (accBuf.current.length > ACC_VARIANCE_WINDOW) accBuf.current.shift();
-
-      // In RIPOSO: se rileva movimento, sveglia GPS
-      if (modeRef.current === 'rest' && accBuf.current.length >= ACC_VARIANCE_WINDOW) {
-        const v = calcVariance(accBuf.current);
-        if (v > ACC_VARIANCE_THRESHOLD) {
-          console.log('[ACC] Movimento rilevato in RIPOSO → CITTÀ');
-          handleModeChange('city');
-        }
+      if (s.isTracking) {
+        await startGps(s.mode).catch(() => {});
+        startAccelerometer(s.mode);
+        updateCity();
       }
+
+      pollId = setInterval(async () => {
+        const ns = await loadState();
+        const nd = await loadDay();
+        setState(ns);
+        setDay(nd);
+      }, UI_POLL_MS);
+    })();
+
+    const sub = AppState.addEventListener('change', async (next: AppStateStatus) => {
+      if (appState.current.match(/inactive|background/) && next === 'active') {
+        const ns = await loadState();
+        if (ns.isTracking) updateCity();
+      }
+      appState.current = next;
+    });
+
+    return () => {
+      clearInterval(pollId);
+      sub.remove();
+      stopAccelerometer();
+    };
+  }, []);
+
+  // ── Accelerometro ─────────────────────────────────────────
+  function startAccelerometer(mode: VehicleMode): void {
+    stopAccelerometer();
+    const hz = mode === 'rest' ? ACC_HZ_REST : mode === 'city' ? ACC_HZ_CITY : ACC_HZ_TRAVEL;
+    Accelerometer.setUpdateInterval(Math.floor(1000 / hz));
+    accSubscription.current = Accelerometer.addListener(({ x, y, z }) => {
+      const magnitude = Math.sqrt(x * x + y * y + z * z);
+      accSamples.current.push(magnitude);
+      if (accSamples.current.length > ACC_VARIANCE_WINDOW) accSamples.current.shift();
     });
   }
 
-  function stopAcc(): void {
-    accRef.current?.remove();
-    accRef.current = null;
-    accBuf.current = [];
+  function stopAccelerometer(): void {
+    accSubscription.current?.remove();
+    accSubscription.current = null;
+    accSamples.current = [];
   }
 
-  // ── cambio modalità ───────────────────────────────────────
-  async function handleModeChange(newMode: AppMode): Promise<void> {
-    modeRef.current = newMode;
-    setMode(newMode);
-    const state = await loadState();
-    state.mode = newMode;
-    await saveState(state);
-
-    if (newMode === 'rest') {
-      // GPS off per risparmiare batteria
-      await stopGps();
-      Accelerometer.setUpdateInterval(1000 / ACC_HZ_REST);
-    } else {
-      await startGps(newMode);
-      Accelerometer.setUpdateInterval(Math.round(1000 / (newMode === 'travel' ? ACC_HZ_TRAVEL : ACC_HZ_CITY)));
-    }
-  }
-
-  // ── polling UI ────────────────────────────────────────────
+  // ── Città ──────────────────────────────────────────────────
   async function updateCity(): Promise<void> {
     try {
-      // Richiedi permesso se non ancora concesso
       let { status } = await Location.getForegroundPermissionsAsync();
       if (status !== 'granted') {
         const req = await Location.requestForegroundPermissionsAsync();
         status = req.status;
       }
       if (status !== 'granted') return;
-
-      // Prima prova cache (veloce) — se null prendi posizione reale con bassa precisione
       let pos = await Location.getLastKnownPositionAsync();
-      if (!pos) {
-        pos = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Low,
-        });
-      }
+      if (!pos) pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Low });
       if (!pos) return;
-
-      const res = await Location.reverseGeocodeAsync({
-        latitude: pos.coords.latitude,
-        longitude: pos.coords.longitude,
-      });
+      const res = await Location.reverseGeocodeAsync({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
       if (res.length > 0) {
         const r = res[0];
         const city = r.city || r.subregion || r.region;
         if (city) setCurrentCity(city);
       }
-    } catch { /* ignora */ }
+    } catch {}
   }
 
-  function startPolling(): void {
-    if (pollRef.current) clearInterval(pollRef.current);
-    // Contatore per aggiornare la città ogni 30s invece che ogni 2s
-    let cityTick = 0;
-    pollRef.current = setInterval(async () => {
-      const [state, day] = await Promise.all([loadState(), loadDay()]);
-      setMode(state.mode);
-      setVehicleState(state.vehicleState);
-      setSpeedKmh(Math.round(state.lastSpeedKmh));
-      setTripDistM(state.tripDistanceM);
-      setTripMaxSpd(Math.round(state.tripMaxSpeedKmh));
-      setDayStops([...day.stops].reverse());
-      setDayTrips([...day.trips].reverse());
-      setLastSync(Date.now());
-      modeRef.current = state.mode;
-      // Aggiorna città ogni 15 cicli (~30 secondi) per non sprecare batteria
-      cityTick++;
-      if (cityTick >= 15) {
-        cityTick = 0;
-        updateCity();
+  // ── Avvio / Stop tracking ─────────────────────────────────
+  async function handleStartStop(): Promise<void> {
+    if (state.isTracking) {
+      // STOP
+      await stopGps();
+      stopAccelerometer();
+      const now = Date.now();
+
+      const ns: TrackingState = {
+        ...state,
+        isTracking: false,
+        mode: 'rest',
+        tripStartTs: null,
+        tripStartLat: null,
+        tripStartLon: null,
+        tripDistM: 0,
+        tripMaxSpeedKmh: 0,
+        stopStartTs: null,
+        continuousDriveStartTs: null,
+        sessionStartTs: null,
+      };
+
+      // Salva eventuale tragitto in corso
+      if (state.tripStartTs !== null && state.tripDistM >= MIN_DIST_METERS) {
+        const d = await loadDay();
+        const tripKm = state.tripDistM / 1000;
+        const fuel = fuelCalc(tripKm);
+        const ev: TripEvent = {
+          type: 'trip',
+          startTs: state.tripStartTs,
+          endTs: now,
+          durationSec: (now - state.tripStartTs) / 1000,
+          distKm: Math.round(tripKm * 10) / 10,
+          maxSpeedKmh: Math.round(state.tripMaxSpeedKmh),
+          fuelL: fuel.l,
+          fuelEur: fuel.eur,
+        };
+        d.events.push(ev);
+        d.totalKm = Math.round((d.totalKm + tripKm) * 10) / 10;
+        d.totalDriveSecToday = ns.totalDriveSecToday;
+        await saveDay(d);
+        setDay(d);
       }
-    }, UI_POLL_MS);
-  }
 
-  function stopPolling(): void {
-    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
-  }
-
-  // ── START ─────────────────────────────────────────────────
-  async function startTracking(): Promise<void> {
-    const ok = await requestPermissions();
-    if (!ok) return;
-
-    const fresh = defaultState();
-    fresh.isTracking = true;
-    await saveState(fresh);
-    await saveDay(defaultDay());
-
-    await startGps('city');
-    startAcc('city');
-    modeRef.current = 'city';
-    setIsTracking(true);
-    updateCity();
-    setMode('city');
-    setVehicleState('stopped');
-    setSpeedKmh(0);
-    setTripDistM(0);
-    setTripMaxSpd(0);
-    setDayStops([]);
-    setDayTrips([]);
-    startPolling();
-  }
-
-  // ── STOP ──────────────────────────────────────────────────
-  async function stopTracking(): Promise<void> {
-    await stopGps();
-    stopAcc();
-    stopPolling();
-
-    // Salva tragitto in corso se abbastanza lungo
-    const state = await loadState();
-    const day = await loadDay();
-    if (state.tripId && state.tripDistanceM >= MIN_DIST_METERS) {
-      const avg = state.tripSpeedCount > 0
-        ? state.tripSpeedSum / state.tripSpeedCount : 0;
-      day.trips.push({
-        id: state.tripId,
-        startTs: state.tripStartTs!,
-        endTs: Date.now(),
-        startLat: state.tripStartLat!,
-        startLng: state.tripStartLng!,
-        endLat: state.tripLastLat ?? state.tripStartLat!,
-        endLng: state.tripLastLng ?? state.tripStartLng!,
-        distanceMeters: state.tripDistanceM,
-        avgSpeedKmh: Math.round(avg),
-        maxSpeedKmh: Math.round(state.tripMaxSpeedKmh),
-      });
-      await saveDay(day);
+      await saveState(ns);
+      setState(ns);
+    } else {
+      // START
+      try {
+        await startGps('city');
+        startAccelerometer('city');
+        const ns: TrackingState = {
+          ...DEFAULT_STATE,
+          isTracking: true,
+          mode: 'city',
+          sessionStartTs: Date.now(),
+          totalDriveSecToday: state.totalDriveSecToday,
+        };
+        await saveState(ns);
+        setState(ns);
+        updateCity();
+      } catch (e: any) {
+        Alert.alert('Errore permessi', e?.message ?? 'Impossibile avviare il tracking');
+      }
     }
-
-    state.isTracking = false;
-    await saveState(state);
-
-    const finalDay = await loadDay();
-    setIsTracking(false);
-    setMode('city');
-    setVehicleState('stopped');
-    setSpeedKmh(0);
-    setTripDistM(0);
-    setTripMaxSpd(0);
-    setDayStops([...finalDay.stops].reverse());
-    setDayTrips([...finalDay.trips].reverse());
   }
 
-  // ── EXPORT ────────────────────────────────────────────────
+  // ── Export giornata ───────────────────────────────────────
   async function exportDay(): Promise<void> {
-    const day = await loadDay();
-    if (day.trips.length === 0 && day.stops.length === 0) {
-      Alert.alert('Nessun dato', 'Avvia e ferma il tracking prima di esportare.');
+    const d = await loadDay();
+    if (!d.events.length) {
+      Alert.alert('Nessun dato', 'Non ci sono viaggi registrati oggi.');
       return;
     }
-    const totalKm = day.trips.reduce((s, t) => s + t.distanceMeters, 0) / 1000;
-    const totalStopSec = day.stops.reduce((s, st) => s + st.durationSec, 0);
-
-    const payload = {
-      app: 'Nexus Flow',
-      exportedAt: new Date().toISOString(),
-      date: day.date,
-      sommario: {
-        totalKm: parseFloat(totalKm.toFixed(2)),
-        totaleSoste: day.stops.length,
-        totaleTragitti: day.trips.length,
-        tempoSosteSec: totalStopSec,
-      },
-      tragitti: day.trips.map(t => ({
-        ...t,
-        mapLink: `https://www.google.com/maps/dir/${t.startLat},${t.startLng}/${t.endLat},${t.endLng}`,
-      })),
-      soste: day.stops,
-    };
-
-    try {
-      await Share.share(
-        {
-          title: `nexusflow_${day.date}.json`,
-          message: JSON.stringify(payload, null, 2),
-        },
-        { dialogTitle: 'Esporta dati giornata' },
-      );
-    } catch (e: any) {
-      Alert.alert('Errore export', e.message ?? 'Impossibile esportare il file.');
-    }
+    const fuel = fuelCalc(d.totalKm);
+    const lines: string[] = [
+      `NEXUS FLOW — Resoconto ${d.date}`,
+      `────────────────────────────────`,
+      `Distanza totale: ${d.totalKm} km`,
+      `Tempo guida: ${fmtDuration(d.totalDriveSecToday)}`,
+      `Carburante stimato: ${fuel.l} L  (€ ${fuel.eur.toFixed(2)})`,
+      `Viaggi: ${d.events.filter(e => e.type === 'trip').length}`,
+      ``,
+      `DETTAGLIO VIAGGI`,
+      `────────────────────────────────`,
+    ];
+    d.events.forEach((ev, i) => {
+      if (ev.type === 'trip') {
+        lines.push(`Viaggio ${i + 1}`);
+        lines.push(`  Inizio: ${fmtTime(ev.startTs)}   Fine: ${fmtTime(ev.endTs)}`);
+        lines.push(`  Distanza: ${ev.distKm} km   Max: ${ev.maxSpeedKmh} km/h`);
+        lines.push(`  Durata: ${fmtDuration(ev.durationSec)}`);
+        lines.push(`  Carburante: ${ev.fuelL} L  (€ ${ev.fuelEur?.toFixed(2)})`);
+        lines.push(`  Mappa: https://www.google.com/maps/search/?api=1&query=${ev.startCity ?? ''}`);
+        lines.push(``);
+      }
+    });
+    await Share.share({ message: lines.join('\n'), title: `Nexus Flow ${d.date}` });
   }
 
-  // ── lifecycle ─────────────────────────────────────────────
-  useEffect(() => {
-    // Riprendi se il tracking era già attivo (app riaperta)
-    (async () => {
-      const state = await loadState();
-      if (state.isTracking) {
-        const day = await loadDay();
-        setIsTracking(true);
-        setMode(state.mode);
-        modeRef.current = state.mode;
-        setDayStops([...day.stops].reverse());
-        setDayTrips([...day.trips].reverse());
-        // Riavvia GPS — mancava questo, il tracking non riprendeva dopo riavvio app
-        await startGps(state.mode).catch(() => {});
-        startAcc(state.mode);
-        startPolling();
-      }
-      // Rileva sempre la città al primo avvio
-      updateCity();
-    })();
+  // ── Calcolo valori live ────────────────────────────────────
+  const now = Date.now();
+  const sessionSec = state.sessionStartTs ? (now - state.sessionStartTs) / 1000 : 0;
+  const currentTripKm = state.tripDistM / 1000;
+  const currentTripFuel = fuelCalc(currentTripKm);
+  const dayFuel = fuelCalc(day.totalKm);
+  const totalDriveSec = state.totalDriveSecToday;
 
-    const sub = AppState.addEventListener('change', (_next: AppStateStatus) => {
-      // Nessuna azione richiesta: il task BG gestisce tutto in background
-    });
+  // Guida continua
+  const contDriveSec = state.continuousDriveStartTs
+    ? (now - state.continuousDriveStartTs) / 1000
+    : 0;
+  const timeToBreakSec = Math.max(0, EU_MAX_DRIVE_SEC - contDriveSec);
+  const euWarn = contDriveSec >= EU_MAX_DRIVE_SEC - EU_WARN_BEFORE_SEC;
+  const euAlert = contDriveSec >= EU_MAX_DRIVE_SEC;
 
-    return () => {
-      stopPolling();
-      stopAcc();
-      sub.remove();
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Speed alert
+  const speedAlert = state.lastSpeedKmh > SPEED_LIMIT_KMH;
 
-  // ── computed ──────────────────────────────────────────────
-  const totalDayKm = dayTrips.reduce((s, t) => s + t.distanceMeters, 0) / 1000;
-  const hasData    = dayTrips.length > 0 || dayStops.length > 0;
+  const modeLabel = { rest: 'RIPOSO', city: 'CITTÀ', travel: 'VIAGGIO' }[state.mode];
+  const modeColor = { rest: C.textMuted, city: C.blue, travel: C.green }[state.mode];
 
-  const MODE_COLOR  = mode === 'rest' ? '#555' : mode === 'travel' ? '#00FF88' : '#FFA500';
-  const MODE_LABEL  = mode === 'rest' ? 'RIPOSO' : mode === 'travel' ? 'VIAGGIO' : 'CITTÀ';
-  const MODE_ICON   = mode === 'rest' ? '💤' : mode === 'travel' ? '🚛' : '🏙';
+  if (loading) {
+    return (
+      <SafeAreaView style={s.root}>
+        <StatusBar barStyle="light-content" backgroundColor={C.bg} />
+        <View style={[s.center, { flex: 1 }]}>
+          <Text style={[s.label, { color: C.green, fontSize: 18 }]}>NEXUS FLOW</Text>
+          <Text style={[s.label, { color: C.textMuted, marginTop: 8 }]}>Caricamento…</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
-  const events = [
-    ...dayStops.map(s => ({ type: 'stop' as const, ts: s.startTs, data: s })),
-    ...dayTrips.map(t => ({ type: 'trip' as const, ts: t.startTs, data: t })),
-  ].sort((a, b) => b.ts - a.ts).slice(0, 8);
-
-  // ── render ────────────────────────────────────────────────
   return (
     <SafeAreaView style={s.root}>
-      <StatusBar barStyle="light-content" backgroundColor="#000" />
+      <StatusBar barStyle="light-content" backgroundColor={C.bg} />
 
-      {/* HEADER */}
+      {/* ── HEADER ── */}
       <View style={s.header}>
-        <Text style={s.logo}>NEXUS FLOW</Text>
-        <View style={{ alignItems: 'flex-end' }}>
-          <Text style={s.cityLabel}>📍 {currentCity}</Text>
-          <Text style={s.sync}>
-            {lastSync ? `↺ ${fmtTime(lastSync)}` : '—'}
-          </Text>
+        <View>
+          <Text style={s.appTitle}>NEXUS FLOW</Text>
+          <Text style={s.appSub}>GPS Tracker Professionale</Text>
+        </View>
+        <View style={s.headerRight}>
+          <Text style={s.clock}>{clock}</Text>
+          <Text style={[s.cityChip]}>{currentCity}</Text>
         </View>
       </View>
 
+      {/* ── ALERT VELOCITÀ ── */}
+      {speedAlert && (
+        <View style={[s.alertBar, { backgroundColor: C.red }]}>
+          <Text style={s.alertBarText}>
+            ⚠ VELOCITÀ ELEVATA — {Math.round(state.lastSpeedKmh)} km/h  (limite {SPEED_LIMIT_KMH} km/h)
+          </Text>
+        </View>
+      )}
+
+      {/* ── ALERT EU GUIDA ── */}
+      {euAlert && (
+        <View style={[s.alertBar, { backgroundColor: C.red }]}>
+          <Text style={s.alertBarText}>
+            🛑 PAUSA OBBLIGATORIA — Limite UE di 4h 30m raggiunto!
+          </Text>
+        </View>
+      )}
+      {!euAlert && euWarn && state.isTracking && (
+        <View style={[s.alertBar, { backgroundColor: C.orange }]}>
+          <Text style={s.alertBarText}>
+            ⏰ PAUSA TRA {fmtDuration(timeToBreakSec)} — Norma UE tempi guida
+          </Text>
+        </View>
+      )}
+
       <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
 
-        {/* MODALITÀ */}
-        <View style={[s.card, s.modeCard]}>
-          <Text style={s.modeEmoji}>{MODE_ICON}</Text>
-          <Text style={[s.modeText, { color: MODE_COLOR }]}>{MODE_LABEL}</Text>
-          {isTracking && (
-            <Text style={s.speedBadge}>{speedKmh} km/h</Text>
-          )}
-        </View>
-
-        {/* TRAGITTO IN CORSO */}
-        {isTracking && vehicleState === 'moving' && (
-          <View style={[s.card, s.tripLiveCard]}>
-            <Text style={s.cardLabel}>TRAGITTO IN CORSO</Text>
-            <View style={s.row}>
-              <View style={s.statCell}>
-                <Text style={s.statBig}>{fmtDist(tripDistM)}</Text>
-                <Text style={s.statSub}>distanza</Text>
-              </View>
-              <View style={s.statCell}>
-                <Text style={s.statBig}>{tripMaxSpd}</Text>
-                <Text style={s.statSub}>km/h max</Text>
-              </View>
-            </View>
-          </View>
-        )}
-
-        {/* RIEPILOGO GIORNATA */}
+        {/* ── CARD STATO & VELOCITÀ ── */}
         <View style={s.card}>
-          <Text style={s.cardLabel}>
-            OGGI — {new Date().toLocaleDateString('it-IT', { weekday: 'long', day: '2-digit', month: 'long' }).toUpperCase()}
-          </Text>
-          <View style={s.row}>
-            <View style={s.statCell}>
-              <Text style={s.statBig}>{totalDayKm.toFixed(1)}</Text>
-              <Text style={s.statSub}>km totali</Text>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <View>
+              <Text style={s.cardLabel}>MODALITÀ</Text>
+              <Text style={[s.modeBadge, { color: modeColor }]}>{modeLabel}</Text>
+              {state.isTracking && (
+                <Text style={s.cardSub}>Sessione: {fmtDuration(sessionSec)}</Text>
+              )}
             </View>
-            <View style={s.statCell}>
-              <Text style={s.statBig}>{dayTrips.length}</Text>
-              <Text style={s.statSub}>tragitti</Text>
-            </View>
-            <View style={s.statCell}>
-              <Text style={s.statBig}>{dayStops.length}</Text>
-              <Text style={s.statSub}>soste</Text>
+            <View style={s.speedBox}>
+              <Text style={[s.speedNum, { color: speedAlert ? C.red : C.green }]}>
+                {Math.round(state.lastSpeedKmh)}
+              </Text>
+              <Text style={s.speedUnit}>km/h</Text>
             </View>
           </View>
         </View>
 
-        {/* BOTTONE PRINCIPALE */}
-        <TouchableOpacity
-          style={[s.mainBtn, isTracking ? s.stopBtn : s.startBtn]}
-          onPress={isTracking ? stopTracking : startTracking}
-          activeOpacity={0.75}
-        >
-          <Text style={[s.mainBtnTxt, isTracking && s.stopBtnTxt]}>
-            {isTracking ? '■  STOP TRACKING' : '▶  START TRACKING'}
-          </Text>
-        </TouchableOpacity>
-
-        {/* EXPORT */}
-        <TouchableOpacity
-          style={[s.exportBtn, !hasData && s.exportBtnDisabled]}
-          onPress={exportDay}
-        >
-          <Text style={[s.exportTxt, !hasData && { color: '#555' }]}>
-            ↑  Esporta giornata (JSON + link mappa)
-          </Text>
-        </TouchableOpacity>
-
-        {/* EVENTI */}
-        {events.length > 0 && (
+        {/* ── CARD TEMPI DI GUIDA (EU) ── */}
+        {state.isTracking && (
           <View style={s.card}>
-            <Text style={s.cardLabel}>ULTIMI EVENTI</Text>
-            {events.map(ev =>
-              ev.type === 'stop' ? (
-                <View key={ev.data.id} style={s.evRow}>
-                  <Text style={s.evIcon}>📍</Text>
-                  <View style={s.evBody}>
-                    <Text style={s.evTitle} numberOfLines={1}>
-                      {(ev.data as StopRecord).address}
-                    </Text>
-                    <Text style={s.evSub}>
-                      {fmtTime(ev.ts)} · {fmtDuration((ev.data as StopRecord).durationSec)}
-                      {(ev.data as StopRecord).postalCode ? `  ·  CAP ${(ev.data as StopRecord).postalCode}` : ''}
-                    </Text>
-                  </View>
-                </View>
-              ) : (
-                <View key={ev.data.id} style={s.evRow}>
-                  <Text style={s.evIcon}>🛣</Text>
-                  <View style={s.evBody}>
-                    <Text style={s.evTitle}>
-                      {fmtDist((ev.data as TripRecord).distanceMeters)}
-                    </Text>
-                    <Text style={s.evSub}>
-                      {fmtTime(ev.ts)} · media {(ev.data as TripRecord).avgSpeedKmh} km/h · max {(ev.data as TripRecord).maxSpeedKmh} km/h
-                    </Text>
-                  </View>
-                </View>
-              )
-            )}
+            <Text style={s.cardLabel}>TEMPI DI GUIDA — NORMA UE</Text>
+            <View style={s.rowBetween}>
+              <View style={s.statCol}>
+                <Text style={s.statVal}>{fmtDuration(contDriveSec)}</Text>
+                <Text style={s.statKey}>Guida continua</Text>
+              </View>
+              <View style={s.statCol}>
+                <Text style={[s.statVal, euAlert ? { color: C.red } : euWarn ? { color: C.orange } : {}]}>
+                  {euAlert ? 'PAUSA!' : fmtDuration(timeToBreakSec)}
+                </Text>
+                <Text style={s.statKey}>Alla pausa</Text>
+              </View>
+              <View style={s.statCol}>
+                <Text style={s.statVal}>{fmtDuration(totalDriveSec)}</Text>
+                <Text style={s.statKey}>Totale oggi</Text>
+              </View>
+            </View>
+            {/* Barra progresso guida continua */}
+            <View style={s.progressBg}>
+              <View
+                style={[
+                  s.progressFill,
+                  {
+                    width: `${Math.min(100, (contDriveSec / EU_MAX_DRIVE_SEC) * 100)}%` as any,
+                    backgroundColor: euAlert ? C.red : euWarn ? C.orange : C.green,
+                  },
+                ]}
+              />
+            </View>
+            <Text style={s.progressLabel}>
+              {Math.round((contDriveSec / EU_MAX_DRIVE_SEC) * 100)}% del limite UE (4h 30m)
+            </Text>
           </View>
         )}
 
-        <View style={{ height: 48 }} />
+        {/* ── CARD VIAGGIO IN CORSO ── */}
+        {state.tripStartTs !== null && (
+          <View style={[s.card, { borderColor: C.green, borderWidth: 1 }]}>
+            <Text style={[s.cardLabel, { color: C.green }]}>VIAGGIO IN CORSO</Text>
+            <View style={s.rowBetween}>
+              <View style={s.statCol}>
+                <Text style={s.statVal}>{currentTripKm.toFixed(1)} km</Text>
+                <Text style={s.statKey}>Distanza</Text>
+              </View>
+              <View style={s.statCol}>
+                <Text style={s.statVal}>{Math.round(state.tripMaxSpeedKmh)} km/h</Text>
+                <Text style={s.statKey}>Max velocità</Text>
+              </View>
+              <View style={s.statCol}>
+                <Text style={s.statVal}>{currentTripFuel.l} L</Text>
+                <Text style={s.statKey}>Carburante stimato</Text>
+              </View>
+            </View>
+            <Text style={[s.cardSub, { marginTop: 4 }]}>
+              Partenza: {fmtTime(state.tripStartTs)} · Costo est. € {currentTripFuel.eur.toFixed(2)}
+            </Text>
+          </View>
+        )}
+
+        {/* ── CARD RIEPILOGO GIORNATA ── */}
+        <View style={s.card}>
+          <Text style={s.cardLabel}>GIORNATA — {day.date}</Text>
+          <View style={s.rowBetween}>
+            <View style={s.statCol}>
+              <Text style={s.statVal}>{day.totalKm} km</Text>
+              <Text style={s.statKey}>Percorsi</Text>
+            </View>
+            <View style={s.statCol}>
+              <Text style={s.statVal}>{day.events.filter(e => e.type === 'trip').length}</Text>
+              <Text style={s.statKey}>Viaggi</Text>
+            </View>
+            <View style={s.statCol}>
+              <Text style={s.statVal}>{dayFuel.l} L</Text>
+              <Text style={s.statKey}>Carburante</Text>
+            </View>
+            <View style={s.statCol}>
+              <Text style={s.statVal}>€ {dayFuel.eur.toFixed(2)}</Text>
+              <Text style={s.statKey}>Costo</Text>
+            </View>
+          </View>
+        </View>
+
+        {/* ── PULSANTE START / STOP ── */}
+        <TouchableOpacity
+          style={[s.mainBtn, { backgroundColor: state.isTracking ? C.redDim : C.greenDim }]}
+          onPress={handleStartStop}
+          activeOpacity={0.8}
+        >
+          <Text style={s.mainBtnText}>
+            {state.isTracking ? '⏹  FERMA TRACKING' : '▶  AVVIA TRACKING'}
+          </Text>
+        </TouchableOpacity>
+
+        {/* ── PULSANTE EXPORT ── */}
+        <TouchableOpacity style={s.exportBtn} onPress={exportDay} activeOpacity={0.8}>
+          <Text style={s.exportBtnText}>↑  ESPORTA GIORNATA</Text>
+        </TouchableOpacity>
+
+        {/* ── LISTA EVENTI ── */}
+        {day.events.length > 0 && (
+          <View style={s.card}>
+            <Text style={s.cardLabel}>EVENTI REGISTRATI</Text>
+            {[...day.events].reverse().map((ev, idx) => (
+              <View key={idx} style={s.eventRow}>
+                <View style={[s.eventDot, { backgroundColor: ev.type === 'trip' ? C.green : C.orange }]} />
+                <View style={{ flex: 1 }}>
+                  <View style={s.rowBetween}>
+                    <Text style={s.eventTitle}>
+                      {ev.type === 'trip'
+                        ? `Viaggio — ${ev.distKm} km`
+                        : `Sosta`}
+                    </Text>
+                    <Text style={s.eventTime}>
+                      {fmtTime(ev.startTs)} → {fmtTime(ev.endTs)}
+                    </Text>
+                  </View>
+                  {ev.type === 'trip' && (
+                    <Text style={s.eventSub}>
+                      Max {ev.maxSpeedKmh} km/h · {fmtDuration(ev.durationSec)} · {ev.fuelL} L (€ {ev.fuelEur?.toFixed(2)})
+                    </Text>
+                  )}
+                  {ev.type === 'stop' && (
+                    <Text style={s.eventSub}>{fmtDuration(ev.durationSec)}</Text>
+                  )}
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
+
+        <View style={{ height: 40 }} />
       </ScrollView>
     </SafeAreaView>
   );
 }
 
 // ============================================================
-// STILI — tema OLED scuro
+// STILI
 // ============================================================
 const s = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: '#000',
-  },
+  root: { flex: 1, backgroundColor: C.bg },
+  center: { alignItems: 'center', justifyContent: 'center' },
+  scroll: { padding: 16, paddingTop: 8 },
+
+  // Header
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#111',
+    borderBottomColor: C.border,
+    backgroundColor: C.surface,
   },
-  logo: {
-    color: '#00FF88',
-    fontSize: 18,
-    fontWeight: '800',
-    letterSpacing: 4,
-  },
-  sync: {
-    color: '#333',
-    fontSize: 12,
-  },
-  scroll: {
-    padding: 16,
-    gap: 12,
-  },
+  appTitle: { fontSize: 20, fontWeight: '800', color: C.green, letterSpacing: 2 },
+  appSub:   { fontSize: 10, color: C.textMuted, letterSpacing: 1, marginTop: 1 },
+  headerRight: { alignItems: 'flex-end' },
+  clock: { fontSize: 18, fontWeight: '700', color: C.text, fontVariant: ['tabular-nums'] },
+  cityChip: { fontSize: 12, color: C.blue, marginTop: 2 },
+
+  // Alert bar
+  alertBar: { paddingVertical: 8, paddingHorizontal: 16, alignItems: 'center' },
+  alertBarText: { color: C.white, fontWeight: '700', fontSize: 13, textAlign: 'center' },
+
+  // Card
   card: {
-    backgroundColor: '#0A0A0A',
-    borderRadius: 14,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: '#181818',
-  },
-  modeCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 22,
-    gap: 14,
-  },
-  modeEmoji: {
-    fontSize: 30,
-  },
-  modeText: {
-    fontSize: 30,
-    fontWeight: '800',
-    letterSpacing: 3,
-  },
-  speedBadge: {
-    color: '#444',
-    fontSize: 16,
-    marginLeft: 4,
-    alignSelf: 'flex-end',
-    marginBottom: 4,
-  },
-  tripLiveCard: {
-    borderColor: '#003322',
-  },
-  cardLabel: {
-    color: '#333',
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 2,
-    marginBottom: 14,
-  },
-  row: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-  },
-  statCell: {
-    alignItems: 'center',
-  },
-  statBig: {
-    color: '#fff',
-    fontSize: 34,
-    fontWeight: '700',
-    letterSpacing: -1,
-  },
-  statSub: {
-    color: '#444',
-    fontSize: 11,
-    marginTop: 3,
-  },
-  mainBtn: {
-    borderRadius: 16,
-    paddingVertical: 22,
-    alignItems: 'center',
-    marginTop: 4,
-  },
-  startBtn: {
-    backgroundColor: '#00FF88',
-  },
-  stopBtn: {
-    backgroundColor: '#0A0A0A',
-    borderWidth: 2,
-    borderColor: '#FF3B30',
-  },
-  mainBtnTxt: {
-    fontSize: 18,
-    fontWeight: '800',
-    letterSpacing: 3,
-    color: '#000',
-  },
-  stopBtnTxt: {
-    color: '#FF3B30',
-  },
-  exportBtn: {
+    backgroundColor: C.surface,
     borderRadius: 12,
+    borderWidth: 1,
+    borderColor: C.border,
+    padding: 16,
+    marginBottom: 12,
+  },
+  cardLabel: { fontSize: 10, color: C.textMuted, letterSpacing: 1.5, fontWeight: '700', marginBottom: 8 },
+  cardSub:   { fontSize: 12, color: C.textSub, marginTop: 2 },
+
+  // Modalità & velocità
+  modeBadge: { fontSize: 26, fontWeight: '800', letterSpacing: 1 },
+  speedBox: { alignItems: 'center' },
+  speedNum: { fontSize: 52, fontWeight: '900', lineHeight: 58, fontVariant: ['tabular-nums'] },
+  speedUnit: { fontSize: 14, color: C.textSub, marginTop: -4 },
+
+  // Stats
+  rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  statCol:    { alignItems: 'center', flex: 1 },
+  statVal:    { fontSize: 18, fontWeight: '700', color: C.text },
+  statKey:    { fontSize: 10, color: C.textMuted, marginTop: 2, textAlign: 'center' },
+
+  // Progress bar
+  progressBg:   { height: 6, backgroundColor: C.border, borderRadius: 3, marginTop: 12, overflow: 'hidden' },
+  progressFill:  { height: 6, borderRadius: 3 },
+  progressLabel: { fontSize: 11, color: C.textMuted, marginTop: 4 },
+
+  // Buttons
+  mainBtn: {
+    borderRadius: 14,
+    paddingVertical: 18,
+    alignItems: 'center',
+    marginBottom: 10,
+    shadowColor: C.green,
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  mainBtnText: { fontSize: 18, fontWeight: '800', color: C.white, letterSpacing: 1 },
+  exportBtn: {
+    borderRadius: 14,
     paddingVertical: 14,
     alignItems: 'center',
-    backgroundColor: '#0A0A0A',
+    marginBottom: 14,
     borderWidth: 1,
-    borderColor: '#00FF88',
+    borderColor: C.border,
+    backgroundColor: C.surfaceLight,
   },
-  exportBtnDisabled: {
-    borderColor: '#222',
-    opacity: 0.4,
-  },
-  exportTxt: {
-    color: '#00FF88',
-    fontSize: 13,
-    fontWeight: '600',
-    letterSpacing: 1,
-  },
-  cityLabel: {
-    color: '#aaa',
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  evRow: {
+  exportBtnText: { fontSize: 15, fontWeight: '700', color: C.blue, letterSpacing: 0.5 },
+
+  // Events
+  eventRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginBottom: 14,
-    gap: 12,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: C.border,
+    gap: 10,
   },
-  evIcon: {
-    fontSize: 18,
-    marginTop: 1,
-  },
-  evBody: {
-    flex: 1,
-  },
-  evTitle: {
-    color: '#ddd',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  evSub: {
-    color: '#444',
-    fontSize: 12,
-    marginTop: 3,
-  },
+  eventDot:   { width: 10, height: 10, borderRadius: 5, marginTop: 4 },
+  eventTitle: { fontSize: 14, fontWeight: '700', color: C.text },
+  eventTime:  { fontSize: 11, color: C.textMuted },
+  eventSub:   { fontSize: 12, color: C.textSub, marginTop: 2 },
+
+  label: { fontSize: 14, color: C.text },
 });
 
 registerRootComponent(App);
+export default App;
