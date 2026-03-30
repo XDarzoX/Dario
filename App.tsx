@@ -21,7 +21,6 @@ import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Accelerometer } from 'expo-sensors';
-import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 
 // ============================================================
 // PALETTE COLORI
@@ -732,33 +731,17 @@ function App(): React.JSX.Element {
           </View>
         )}
 
-        {/* ── MAPPA IN TEMPO REALE ── */}
-        <View style={s.mapCard}>
-          <MapView
-            style={s.map}
-            provider={PROVIDER_GOOGLE}
-            region={mapRegion}
-            showsUserLocation
-            followsUserLocation
-            showsMyLocationButton={false}
-            showsCompass={false}
-            mapType="standard"
-          >
-            {routeCoords.current.length > 1 && (
-              <Polyline
-                coordinates={routeCoords.current}
-                strokeColor={C.green}
-                strokeWidth={4}
-              />
-            )}
-            {state.lastLat !== null && state.lastLon !== null && (
-              <Marker
-                coordinate={{ latitude: state.lastLat, longitude: state.lastLon }}
-                title="Posizione attuale"
-                pinColor={C.green}
-              />
-            )}
-          </MapView>
+        {/* ── MAPPA (disponibile dopo nuova build) ── */}
+        <View style={[s.mapCard, { alignItems: 'center', justifyContent: 'center' }]}>
+          <Text style={{ color: C.textMuted, fontSize: 13, fontWeight: '700' }}>MAPPA IN TEMPO REALE</Text>
+          <Text style={{ color: C.textMuted, fontSize: 11, marginTop: 6, textAlign: 'center', paddingHorizontal: 20 }}>
+            Disponibile dopo la prossima build{'\n'}( eas build --platform android --profile preview )
+          </Text>
+          {state.lastLat !== null && (
+            <Text style={{ color: C.blue, fontSize: 11, marginTop: 8 }}>
+              {state.lastLat?.toFixed(5)}, {state.lastLon?.toFixed(5)}
+            </Text>
+          )}
         </View>
 
         {/* ── CARD RIEPILOGO GIORNATA ── */}
