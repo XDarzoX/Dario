@@ -334,7 +334,6 @@ function App(): React.JSX.Element {
   const [currentCity, setCurrentCity] = useState<string>('—');
   const [clock, setClock] = useState<string>(fmtClock());
   const [loading, setLoading] = useState<boolean>(true);
-  const [showMap, setShowMap] = useState<boolean>(false);
   const [mapRegion, setMapRegion] = useState({ latitude: 41.9, longitude: 12.5, latitudeDelta: 0.02, longitudeDelta: 0.02 });
   const routeCoords = useRef<{ latitude: number; longitude: number }[]>([]);
 
@@ -733,46 +732,34 @@ function App(): React.JSX.Element {
           </View>
         )}
 
-        {/* ── CARD MAPPA ── */}
-        <TouchableOpacity
-          style={[s.exportBtn, { marginBottom: 12, borderColor: showMap ? C.green : C.border }]}
-          onPress={() => setShowMap(v => !v)}
-          activeOpacity={0.8}
-        >
-          <Text style={[s.exportBtnText, { color: showMap ? C.green : C.textSub }]}>
-            {showMap ? '▲  NASCONDI MAPPA' : '▼  MOSTRA MAPPA IN TEMPO REALE'}
-          </Text>
-        </TouchableOpacity>
-
-        {showMap && (
-          <View style={s.mapCard}>
-            <MapView
-              style={s.map}
-              provider={PROVIDER_GOOGLE}
-              region={mapRegion}
-              showsUserLocation
-              followsUserLocation
-              showsMyLocationButton={false}
-              showsCompass={false}
-              mapType="standard"
-            >
-              {routeCoords.current.length > 1 && (
-                <Polyline
-                  coordinates={routeCoords.current}
-                  strokeColor={C.green}
-                  strokeWidth={4}
-                />
-              )}
-              {state.lastLat !== null && state.lastLon !== null && (
-                <Marker
-                  coordinate={{ latitude: state.lastLat, longitude: state.lastLon }}
-                  title="Posizione attuale"
-                  pinColor={C.green}
-                />
-              )}
-            </MapView>
-          </View>
-        )}
+        {/* ── MAPPA IN TEMPO REALE ── */}
+        <View style={s.mapCard}>
+          <MapView
+            style={s.map}
+            provider={PROVIDER_GOOGLE}
+            region={mapRegion}
+            showsUserLocation
+            followsUserLocation
+            showsMyLocationButton={false}
+            showsCompass={false}
+            mapType="standard"
+          >
+            {routeCoords.current.length > 1 && (
+              <Polyline
+                coordinates={routeCoords.current}
+                strokeColor={C.green}
+                strokeWidth={4}
+              />
+            )}
+            {state.lastLat !== null && state.lastLon !== null && (
+              <Marker
+                coordinate={{ latitude: state.lastLat, longitude: state.lastLon }}
+                title="Posizione attuale"
+                pinColor={C.green}
+              />
+            )}
+          </MapView>
+        </View>
 
         {/* ── CARD RIEPILOGO GIORNATA ── */}
         <View style={s.card}>
