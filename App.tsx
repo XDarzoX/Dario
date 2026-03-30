@@ -12,7 +12,6 @@ import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Accelerometer } from 'expo-sensors';
-import MapView, { Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 
 // ============================================================
 // COLORI
@@ -237,8 +236,6 @@ function App(): React.JSX.Element {
   const [loading, setLoading] = useState(true);
 
   // mappa
-  const mapRef = useRef<MapView>(null);
-  const [mapReady, setMapReady] = useState(false);
   const route = useRef<{ latitude: number; longitude: number }[]>([]);
   const [routeSnap, setRouteSnap] = useState<{ latitude: number; longitude: number }[]>([]);
 
@@ -310,12 +307,6 @@ function App(): React.JSX.Element {
           route.current = [...route.current, { latitude: lat, longitude: lon }];
           if (route.current.length > 800) route.current = route.current.slice(-400);
           setRouteSnap([...route.current]);
-          if (mapRef.current && mapReady) {
-            mapRef.current.animateToRegion(
-              { latitude: lat, longitude: lon, latitudeDelta: 0.005, longitudeDelta: 0.005 },
-              300
-            );
-          }
         }
       );
     } catch {}
@@ -465,26 +456,22 @@ function App(): React.JSX.Element {
 
       <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
 
-        {/* MAPPA */}
-        <View style={s.mapBox}>
-          <MapView
-            ref={mapRef}
-            style={s.map}
-            provider={PROVIDER_GOOGLE}
-            onMapReady={() => setMapReady(true)}
-            showsUserLocation
-            showsMyLocationButton={false}
-            showsCompass={false}
-            initialRegion={{ latitude: 41.9, longitude: 12.5, latitudeDelta: 0.05, longitudeDelta: 0.05 }}
-          >
-            {routeSnap.length > 1 && (
-              <Polyline coordinates={routeSnap} strokeColor={C.green} strokeWidth={4} />
-            )}
-          </MapView>
-          {!st.isTracking && (
-            <View style={s.mapOverlay}>
-              <Text style={[s.small, { color: C.muted }]}>Avvia il tracking per vedere la mappa</Text>
-            </View>
+        {/* MAPPA — placeholder fino a nuova build */}
+        <View style={[s.mapBox, { alignItems: 'center', justifyContent: 'center' }]}>
+          {st.lastLat !== null ? (
+            <>
+              <Text style={[s.small, { color: C.green, fontWeight: '700' }]}>📍 GPS ATTIVO</Text>
+              <Text style={[s.small, { color: C.sub, marginTop: 4 }]}>
+                {st.lastLat.toFixed(5)}, {st.lastLon?.toFixed(5)}
+              </Text>
+              <Text style={[s.small, { color: C.muted, marginTop: 6, textAlign: 'center', paddingHorizontal: 30 }]}>
+                Mappa visiva disponibile dopo{'\n'}eas build --platform android --profile preview
+              </Text>
+            </>
+          ) : (
+            <Text style={[s.small, { color: C.muted }]}>
+              {st.isTracking ? 'Acquisizione GPS…' : 'Avvia il tracking per la mappa'}
+            </Text>
           )}
         </View>
 
