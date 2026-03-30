@@ -16,6 +16,7 @@ import {
   SafeAreaView,
   AppState,
   AppStateStatus,
+  Linking,
 } from 'react-native';
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
@@ -58,7 +59,7 @@ const GPS_INTERVAL_CITY_MS   = 12_000;
 const GPS_INTERVAL_TRAVEL_MS = 4_000;
 const GPS_DISTANCE_CITY_M    = 10;
 const GPS_DISTANCE_TRAVEL_M  = 5;
-const GPS_ACCURACY_LIMIT_M   = 50;
+const GPS_ACCURACY_LIMIT_M   = 120;  // più alto = funziona in tasca
 
 const ACC_HZ_REST            = 1;
 const ACC_HZ_CITY            = 5;
@@ -67,10 +68,6 @@ const ACC_VARIANCE_THRESHOLD = 0.008;
 const ACC_VARIANCE_WINDOW    = 20;
 
 const UI_POLL_MS             = 2_000;
-
-// Carburante (camion medio)
-const FUEL_L_PER_100KM       = 30;
-const FUEL_PRICE_EUR         = 1.85;
 
 // Limiti EU conducente
 const SPEED_LIMIT_KMH        = 90;
@@ -117,8 +114,6 @@ interface TripEvent {
   maxSpeedKmh?: number;
   startCity?: string;
   endCity?: string;
-  fuelL?: number;
-  fuelEur?: number;
 }
 
 interface DayData {
@@ -180,11 +175,6 @@ function fmtDuration(sec: number): string {
 
 function fmtClock(): string {
   return new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-}
-
-function fuelCalc(km: number): { l: number; eur: number } {
-  const l = (km / 100) * FUEL_L_PER_100KM;
-  return { l: Math.round(l * 10) / 10, eur: Math.round(l * FUEL_PRICE_EUR * 100) / 100 };
 }
 
 async function loadState(): Promise<TrackingState> {
@@ -266,7 +256,6 @@ TaskManager.defineTask(BG_TASK, async ({ data, error }: any) => {
         if (s.tripDistM >= MIN_DIST_METERS) {
           const day = await loadDay();
           const tripKm = s.tripDistM / 1000;
-          const fuel = fuelCalc(tripKm);
           const driveSec = (s.stopStartTs - s.tripStartTs) / 1000;
           const ev: TripEvent = {
             type: 'trip',
@@ -275,8 +264,6 @@ TaskManager.defineTask(BG_TASK, async ({ data, error }: any) => {
             durationSec: driveSec,
             distKm: Math.round(tripKm * 10) / 10,
             maxSpeedKmh: Math.round(s.tripMaxSpeedKmh),
-            fuelL: fuel.l,
-            fuelEur: fuel.eur,
           };
           day.events.push(ev);
           day.totalKm = Math.round((day.totalKm + tripKm) * 10) / 10;
@@ -351,6 +338,9 @@ function App(): React.JSX.Element {
   const appState = useRef<AppStateStatus>(AppState.currentState);
   const accSubscription = useRef<any>(null);
   const accSamples = useRef<number[]>([]);
+  const fgWatcher = useRef<Location.LocationSubscription | null>(null);
+  const fgLastLat = useRef<number | null>(null);
+  const fgLastLon = useRef<number | null>(null);
 
   // ── Tick dell'orologio ─────────────────────────────────────
   useEffect(() => {
@@ -372,6 +362,7 @@ function App(): React.JSX.Element {
       if (s.isTracking) {
         await startGps(s.mode).catch(() => {});
         startAccelerometer(s.mode);
+        startFgWatcher();
         updateCity();
       }
 
@@ -395,8 +386,50 @@ function App(): React.JSX.Element {
       clearInterval(pollId);
       sub.remove();
       stopAccelerometer();
+      stopFgWatcher();
     };
   }, []);
+
+  // ── Watcher foreground (aggiornamenti 1s in tempo reale) ──
+  async function startFgWatcher(): Promise<void> {
+    stopFgWatcher();
+    fgLastLat.current = null;
+    fgLastLon.current = null;
+    try {
+      fgWatcher.current = await Location.watchPositionAsync(
+        { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 1000, distanceInterval: 1 },
+        (loc) => {
+          const speedKmh = Math.max(0, (loc.coords.speed ?? 0) * 3.6);
+          const lat = loc.coords.latitude;
+          const lon = loc.coords.longitude;
+          setState(prev => {
+            if (!prev.isTracking) return prev;
+            let addedDist = 0;
+            if (fgLastLat.current !== null && fgLastLon.current !== null) {
+              addedDist = haversineM(fgLastLat.current, fgLastLon.current, lat, lon);
+            }
+            fgLastLat.current = lat;
+            fgLastLon.current = lon;
+            const newTripDist = speedKmh > STOP_SPEED_KMH
+              ? prev.tripDistM + addedDist
+              : prev.tripDistM;
+            const newMaxSpeed = speedKmh > prev.tripMaxSpeedKmh ? speedKmh : prev.tripMaxSpeedKmh;
+            return {
+              ...prev,
+              lastSpeedKmh: speedKmh,
+              tripDistM: newTripDist,
+              tripMaxSpeedKmh: prev.tripStartTs !== null ? newMaxSpeed : prev.tripMaxSpeedKmh,
+            };
+          });
+        }
+      );
+    } catch {}
+  }
+
+  function stopFgWatcher(): void {
+    fgWatcher.current?.remove();
+    fgWatcher.current = null;
+  }
 
   // ── Accelerometro ─────────────────────────────────────────
   function startAccelerometer(mode: VehicleMode): void {
@@ -443,6 +476,7 @@ function App(): React.JSX.Element {
       // STOP
       await stopGps();
       stopAccelerometer();
+      stopFgWatcher();
       const now = Date.now();
 
       const ns: TrackingState = {
@@ -463,7 +497,6 @@ function App(): React.JSX.Element {
       if (state.tripStartTs !== null && state.tripDistM >= MIN_DIST_METERS) {
         const d = await loadDay();
         const tripKm = state.tripDistM / 1000;
-        const fuel = fuelCalc(tripKm);
         const ev: TripEvent = {
           type: 'trip',
           startTs: state.tripStartTs,
@@ -471,8 +504,6 @@ function App(): React.JSX.Element {
           durationSec: (now - state.tripStartTs) / 1000,
           distKm: Math.round(tripKm * 10) / 10,
           maxSpeedKmh: Math.round(state.tripMaxSpeedKmh),
-          fuelL: fuel.l,
-          fuelEur: fuel.eur,
         };
         d.events.push(ev);
         d.totalKm = Math.round((d.totalKm + tripKm) * 10) / 10;
@@ -488,6 +519,7 @@ function App(): React.JSX.Element {
       try {
         await startGps('city');
         startAccelerometer('city');
+        startFgWatcher();
         const ns: TrackingState = {
           ...DEFAULT_STATE,
           isTracking: true,
@@ -511,13 +543,11 @@ function App(): React.JSX.Element {
       Alert.alert('Nessun dato', 'Non ci sono viaggi registrati oggi.');
       return;
     }
-    const fuel = fuelCalc(d.totalKm);
     const lines: string[] = [
       `NEXUS FLOW — Resoconto ${d.date}`,
       `────────────────────────────────`,
       `Distanza totale: ${d.totalKm} km`,
       `Tempo guida: ${fmtDuration(d.totalDriveSecToday)}`,
-      `Carburante stimato: ${fuel.l} L  (€ ${fuel.eur.toFixed(2)})`,
       `Viaggi: ${d.events.filter(e => e.type === 'trip').length}`,
       ``,
       `DETTAGLIO VIAGGI`,
@@ -529,8 +559,6 @@ function App(): React.JSX.Element {
         lines.push(`  Inizio: ${fmtTime(ev.startTs)}   Fine: ${fmtTime(ev.endTs)}`);
         lines.push(`  Distanza: ${ev.distKm} km   Max: ${ev.maxSpeedKmh} km/h`);
         lines.push(`  Durata: ${fmtDuration(ev.durationSec)}`);
-        lines.push(`  Carburante: ${ev.fuelL} L  (€ ${ev.fuelEur?.toFixed(2)})`);
-        lines.push(`  Mappa: https://www.google.com/maps/search/?api=1&query=${ev.startCity ?? ''}`);
         lines.push(``);
       }
     });
@@ -541,8 +569,6 @@ function App(): React.JSX.Element {
   const now = Date.now();
   const sessionSec = state.sessionStartTs ? (now - state.sessionStartTs) / 1000 : 0;
   const currentTripKm = state.tripDistM / 1000;
-  const currentTripFuel = fuelCalc(currentTripKm);
-  const dayFuel = fuelCalc(day.totalKm);
   const totalDriveSec = state.totalDriveSecToday;
 
   // Guida continua
@@ -685,12 +711,12 @@ function App(): React.JSX.Element {
                 <Text style={s.statKey}>Max velocità</Text>
               </View>
               <View style={s.statCol}>
-                <Text style={s.statVal}>{currentTripFuel.l} L</Text>
-                <Text style={s.statKey}>Carburante stimato</Text>
+                <Text style={s.statVal}>{fmtDuration((now - state.tripStartTs) / 1000)}</Text>
+                <Text style={s.statKey}>Durata</Text>
               </View>
             </View>
             <Text style={[s.cardSub, { marginTop: 4 }]}>
-              Partenza: {fmtTime(state.tripStartTs)} · Costo est. € {currentTripFuel.eur.toFixed(2)}
+              Partenza: {fmtTime(state.tripStartTs)}
             </Text>
           </View>
         )}
@@ -708,12 +734,8 @@ function App(): React.JSX.Element {
               <Text style={s.statKey}>Viaggi</Text>
             </View>
             <View style={s.statCol}>
-              <Text style={s.statVal}>{dayFuel.l} L</Text>
-              <Text style={s.statKey}>Carburante</Text>
-            </View>
-            <View style={s.statCol}>
-              <Text style={s.statVal}>€ {dayFuel.eur.toFixed(2)}</Text>
-              <Text style={s.statKey}>Costo</Text>
+              <Text style={s.statVal}>{fmtDuration(totalDriveSec)}</Text>
+              <Text style={s.statKey}>Tempo guida</Text>
             </View>
           </View>
         </View>
@@ -732,6 +754,23 @@ function App(): React.JSX.Element {
         {/* ── PULSANTE EXPORT ── */}
         <TouchableOpacity style={s.exportBtn} onPress={exportDay} activeOpacity={0.8}>
           <Text style={s.exportBtnText}>↑  ESPORTA GIORNATA</Text>
+        </TouchableOpacity>
+
+        {/* ── PULSANTE MAPPA ── */}
+        <TouchableOpacity
+          style={[s.exportBtn, { borderColor: C.blue, marginBottom: 14 }]}
+          onPress={() => {
+            const lat = state.lastLat;
+            const lon = state.lastLon;
+            if (lat && lon) {
+              Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${lat},${lon}`);
+            } else {
+              Alert.alert('Posizione non disponibile', 'Avvia il tracking prima.');
+            }
+          }}
+          activeOpacity={0.8}
+        >
+          <Text style={[s.exportBtnText, { color: C.blue }]}>⊕  VEDI POSIZIONE SU MAPPA</Text>
         </TouchableOpacity>
 
         {/* ── LISTA EVENTI ── */}
@@ -754,7 +793,7 @@ function App(): React.JSX.Element {
                   </View>
                   {ev.type === 'trip' && (
                     <Text style={s.eventSub}>
-                      Max {ev.maxSpeedKmh} km/h · {fmtDuration(ev.durationSec)} · {ev.fuelL} L (€ {ev.fuelEur?.toFixed(2)})
+                      Max {ev.maxSpeedKmh} km/h · {fmtDuration(ev.durationSec)}
                     </Text>
                   )}
                   {ev.type === 'stop' && (
