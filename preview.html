@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Nexus Flow — Anteprima</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, 'Segoe UI', sans-serif; }
+  body { background: #050810; display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; padding: 24px 16px; }
+
+  .phone {
+    width: 390px;
+    background: #0A0E1A;
+    border-radius: 44px;
+    border: 2px solid #2E3B52;
+    overflow: hidden;
+    box-shadow: 0 40px 80px rgba(0,0,0,0.8), 0 0 0 1px #1C2537;
+  }
+
+  /* Status bar */
+  .statusbar {
+    background: #111827;
+    padding: 14px 24px 6px;
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: #F1F5F9;
+    font-weight: 600;
+  }
+
+  /* Header */
+  .header {
+    background: #111827;
+    padding: 10px 18px 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #252F42;
+  }
+  .app-title { font-size: 20px; font-weight: 800; color: #22C55E; letter-spacing: 3px; }
+  .app-sub { font-size: 9px; color: #475569; letter-spacing: 1px; margin-top: 2px; }
+  .header-right { text-align: right; }
+  .clock { font-size: 19px; font-weight: 700; color: #F1F5F9; font-variant-numeric: tabular-nums; }
+  .city { font-size: 11px; color: #3B82F6; margin-top: 2px; }
+
+  /* Alert bar */
+  .alert-bar {
+    background: #EF4444;
+    padding: 8px 16px;
+    text-align: center;
+    font-size: 12px;
+    font-weight: 700;
+    color: #fff;
+  }
+  .alert-bar.orange { background: #F59E0B; }
+
+  /* Scroll area */
+  .scroll { padding: 14px 14px 20px; overflow-y: auto; max-height: 680px; }
+  .scroll::-webkit-scrollbar { display: none; }
+
+  /* Card */
+  .card {
+    background: #111827;
+    border-radius: 12px;
+    border: 1px solid #252F42;
+    padding: 14px;
+    margin-bottom: 10px;
+  }
+  .card.green-border { border-color: #22C55E; }
+  .card-label {
+    font-size: 9px;
+    color: #475569;
+    letter-spacing: 1.8px;
+    font-weight: 700;
+    margin-bottom: 10px;
+    text-transform: uppercase;
+  }
+  .card-label.green { color: #22C55E; }
+
+  /* Mode + Speed */
+  .mode-speed { display: flex; justify-content: space-between; align-items: center; }
+  .mode-name { font-size: 26px; font-weight: 800; color: #22C55E; letter-spacing: 1px; }
+  .session-time { font-size: 11px; color: #94A3B8; margin-top: 4px; }
+  .speed-box { text-align: center; }
+  .speed-num { font-size: 58px; font-weight: 900; color: #22C55E; line-height: 62px; font-variant-numeric: tabular-nums; }
+  .speed-unit { font-size: 13px; color: #94A3B8; }
+
+  /* Stats row */
+  .row-between { display: flex; justify-content: space-between; }
+  .stat-col { flex: 1; text-align: center; }
+  .stat-val { font-size: 17px; font-weight: 700; color: #F1F5F9; }
+  .stat-val.red { color: #EF4444; }
+  .stat-val.orange { color: #F59E0B; }
+  .stat-key { font-size: 9px; color: #475569; margin-top: 3px; }
+
+  /* Progress bar */
+  .progress-bg { height: 6px; background: #252F42; border-radius: 3px; margin-top: 12px; overflow: hidden; }
+  .progress-fill { height: 6px; border-radius: 3px; background: #22C55E; }
+  .progress-label { font-size: 10px; color: #475569; margin-top: 4px; }
+
+  /* Card sub */
+  .card-sub { font-size: 11px; color: #94A3B8; margin-top: 6px; }
+
+  /* Map */
+  .map-card {
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid #252F42;
+    margin-bottom: 10px;
+    height: 220px;
+    position: relative;
+  }
+  .map-img {
+    width: 100%; height: 100%;
+    background: #1a2035;
+    position: relative;
+    overflow: hidden;
+  }
+  /* Simulated map grid */
+  .map-img::before {
+    content: '';
+    position: absolute; inset: 0;
+    background-image:
+      linear-gradient(rgba(44,62,80,0.5) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(44,62,80,0.5) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+  /* Simulated roads */
+  .road-h { position: absolute; height: 4px; background: #2E3B52; }
+  .road-v { position: absolute; width: 4px; background: #2E3B52; }
+  .road-main { background: #3B4F6B; }
+  /* Route line */
+  .route-line {
+    position: absolute;
+    border-top: 3px solid #22C55E;
+    transform-origin: left center;
+  }
+  /* GPS marker */
+  .gps-marker {
+    position: absolute;
+    width: 16px; height: 16px;
+    background: #22C55E;
+    border-radius: 50%;
+    border: 3px solid #fff;
+    box-shadow: 0 0 0 4px rgba(34,197,94,0.3);
+    transform: translate(-50%, -50%);
+  }
+  .gps-pulse {
+    position: absolute;
+    width: 40px; height: 40px;
+    background: rgba(34,197,94,0.15);
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0% { transform: translate(-50%,-50%) scale(0.5); opacity: 1; }
+    100% { transform: translate(-50%,-50%) scale(1.5); opacity: 0; }
+  }
+  .map-label {
+    position: absolute;
+    bottom: 8px; right: 8px;
+    background: rgba(10,14,26,0.8);
+    color: #94A3B8;
+    font-size: 9px;
+    padding: 3px 6px;
+    border-radius: 4px;
+  }
+
+  /* Buttons */
+  .btn-main {
+    background: #16A34A;
+    border-radius: 14px;
+    padding: 17px;
+    text-align: center;
+    color: #fff;
+    font-size: 17px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    margin-bottom: 9px;
+    cursor: pointer;
+    user-select: none;
+    transition: opacity 0.15s;
+    box-shadow: 0 4px 20px rgba(22,163,74,0.35);
+  }
+  .btn-main.stop { background: #B91C1C; box-shadow: 0 4px 20px rgba(185,28,28,0.35); }
+  .btn-main:active { opacity: 0.8; }
+
+  .btn-export {
+    background: #1C2537;
+    border-radius: 14px;
+    padding: 13px;
+    text-align: center;
+    color: #3B82F6;
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    margin-bottom: 10px;
+    border: 1px solid #252F42;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  /* Events */
+  .event-row {
+    display: flex;
+    align-items: flex-start;
+    padding: 10px 0;
+    border-top: 1px solid #252F42;
+    gap: 10px;
+  }
+  .event-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    margin-top: 3px;
+    flex-shrink: 0;
+  }
+  .event-dot.green { background: #22C55E; }
+  .event-dot.orange { background: #F59E0B; }
+  .event-main { display: flex; justify-content: space-between; align-items: baseline; gap: 4px; }
+  .event-title { font-size: 13px; font-weight: 700; color: #F1F5F9; }
+  .event-time { font-size: 10px; color: #475569; white-space: nowrap; }
+  .event-sub { font-size: 11px; color: #94A3B8; margin-top: 2px; }
+
+  /* Tabs for demo toggle */
+  .demo-bar {
+    position: fixed; top: 0; left: 0; right: 0;
+    background: #050810;
+    padding: 10px 16px;
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    z-index: 100;
+    border-bottom: 1px solid #1C2537;
+  }
+  .demo-btn {
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1px solid #252F42;
+    background: #111827;
+    color: #94A3B8;
+    transition: all 0.15s;
+  }
+  .demo-btn.active { background: #22C55E; color: #000; border-color: #22C55E; }
+  body { padding-top: 60px; }
+</style>
+</head>
+<body>
+
+<!-- Demo controls -->
+<div class="demo-bar">
+  <span style="color:#475569;font-size:12px;line-height:30px;margin-right:4px">Vista:</span>
+  <button class="demo-btn active" onclick="setView('tracking')">In Viaggio</button>
+  <button class="demo-btn" onclick="setView('idle')">Fermo</button>
+  <button class="demo-btn" onclick="setView('alert')">Alert EU</button>
+</div>
+
+<div class="phone">
+  <!-- Status bar -->
+  <div class="statusbar">
+    <span id="status-time">09:41</span>
+    <span>●●●●  WiFi  🔋</span>
+  </div>
+
+  <!-- Header -->
+  <div class="header">
+    <div>
+      <div class="app-title">NEXUS FLOW</div>
+      <div class="app-sub">GPS Tracker Professionale</div>
+    </div>
+    <div class="header-right">
+      <div class="clock" id="clock">09:41:23</div>
+      <div class="city">Milano</div>
+    </div>
+  </div>
+
+  <!-- Alert bar (hidden by default) -->
+  <div class="alert-bar" id="alert-speed" style="display:none">
+    ⚠ VELOCITÀ ELEVATA — 97 km/h  (limite 90 km/h)
+  </div>
+  <div class="alert-bar orange" id="alert-eu" style="display:none">
+    ⏰ PAUSA TRA 28m 14s — Norma UE tempi guida
+  </div>
+
+  <div class="scroll">
+
+    <!-- Modalità + Velocità -->
+    <div class="card">
+      <div class="mode-speed">
+        <div>
+          <div class="card-label">MODALITÀ</div>
+          <div class="mode-name" id="mode-label">VIAGGIO</div>
+          <div class="session-time" id="session-time">Sessione: 2h 14m</div>
+        </div>
+        <div class="speed-box">
+          <div class="speed-num" id="speed-num" style="color:#22C55E">72</div>
+          <div class="speed-unit">km/h</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tempi guida EU -->
+    <div class="card" id="eu-card">
+      <div class="card-label">TEMPI DI GUIDA — NORMA UE</div>
+      <div class="row-between">
+        <div class="stat-col">
+          <div class="stat-val" id="cont-drive">1h 42m</div>
+          <div class="stat-key">Guida continua</div>
+        </div>
+        <div class="stat-col">
+          <div class="stat-val" id="to-break">2h 48m</div>
+          <div class="stat-key">Alla pausa</div>
+        </div>
+        <div class="stat-col">
+          <div class="stat-val">3h 11m</div>
+          <div class="stat-key">Totale oggi</div>
+        </div>
+      </div>
+      <div class="progress-bg">
+        <div class="progress-fill" id="eu-bar" style="width:38%"></div>
+      </div>
+      <div class="progress-label" id="eu-pct">38% del limite UE (4h 30m)</div>
+    </div>
+
+    <!-- Viaggio in corso -->
+    <div class="card green-border" id="trip-card">
+      <div class="card-label green">VIAGGIO IN CORSO</div>
+      <div class="row-between">
+        <div class="stat-col">
+          <div class="stat-val" id="trip-km">12.4 km</div>
+          <div class="stat-key">Distanza</div>
+        </div>
+        <div class="stat-col">
+          <div class="stat-val" id="trip-max">84 km/h</div>
+          <div class="stat-key">Max velocità</div>
+        </div>
+        <div class="stat-col">
+          <div class="stat-val" id="trip-dur">18m 32s</div>
+          <div class="stat-key">Durata</div>
+        </div>
+      </div>
+      <div class="card-sub">Partenza: 09:22</div>
+    </div>
+
+    <!-- MAPPA -->
+    <div class="map-card">
+      <div class="map-img">
+        <!-- Strade simulate -->
+        <div class="road-h road-main" style="top:40%;left:0;right:0;height:6px"></div>
+        <div class="road-h" style="top:65%;left:0;right:0"></div>
+        <div class="road-h" style="top:20%;left:0;right:0"></div>
+        <div class="road-v road-main" style="left:35%;top:0;bottom:0;width:6px"></div>
+        <div class="road-v" style="left:65%;top:0;bottom:0"></div>
+        <div class="road-v" style="left:15%;top:0;bottom:0"></div>
+        <!-- Route percorsa -->
+        <svg style="position:absolute;inset:0;width:100%;height:100%" viewBox="0 0 390 220">
+          <polyline points="30,180 70,165 110,155 150,148 190,143 220,138 250,120 280,100 310,88"
+                    fill="none" stroke="#22C55E" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/>
+        </svg>
+        <!-- Pulse -->
+        <div class="gps-pulse" style="left:310px;top:88px"></div>
+        <!-- Marker GPS -->
+        <div class="gps-marker" style="left:310px;top:88px"></div>
+        <div class="map-label">posizione live · 1s</div>
+      </div>
+    </div>
+
+    <!-- Riepilogo giornata -->
+    <div class="card">
+      <div class="card-label">GIORNATA — 2026-03-30</div>
+      <div class="row-between">
+        <div class="stat-col">
+          <div class="stat-val">47.3 km</div>
+          <div class="stat-key">Percorsi</div>
+        </div>
+        <div class="stat-col">
+          <div class="stat-val">3</div>
+          <div class="stat-key">Viaggi</div>
+        </div>
+        <div class="stat-col">
+          <div class="stat-val">3h 11m</div>
+          <div class="stat-key">Tempo guida</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bottone STOP -->
+    <div class="btn-main stop" id="main-btn" onclick="toggleTracking()">⏹  FERMA TRACKING</div>
+
+    <!-- Bottone Export -->
+    <div class="btn-export">↑  ESPORTA GIORNATA</div>
+
+    <!-- Lista eventi -->
+    <div class="card">
+      <div class="card-label">EVENTI REGISTRATI</div>
+      <div class="event-row">
+        <div class="event-dot green"></div>
+        <div style="flex:1">
+          <div class="event-main">
+            <span class="event-title">Viaggio — 12.4 km</span>
+            <span class="event-time">09:22 → in corso</span>
+          </div>
+          <div class="event-sub">Max 84 km/h · 18m 32s</div>
+        </div>
+      </div>
+      <div class="event-row">
+        <div class="event-dot orange"></div>
+        <div style="flex:1">
+          <div class="event-main">
+            <span class="event-title">Sosta</span>
+            <span class="event-time">08:47 → 09:22</span>
+          </div>
+          <div class="event-sub">35m 00s</div>
+        </div>
+      </div>
+      <div class="event-row">
+        <div class="event-dot green"></div>
+        <div style="flex:1">
+          <div class="event-main">
+            <span class="event-title">Viaggio — 21.7 km</span>
+            <span class="event-time">07:55 → 08:47</span>
+          </div>
+          <div class="event-sub">Max 91 km/h · 52m 10s</div>
+        </div>
+      </div>
+      <div class="event-row">
+        <div class="event-dot green"></div>
+        <div style="flex:1">
+          <div class="event-main">
+            <span class="event-title">Viaggio — 13.2 km</span>
+            <span class="event-time">07:04 → 07:55</span>
+          </div>
+          <div class="event-sub">Max 78 km/h · 51m 00s</div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- end scroll -->
+</div><!-- end phone -->
+
+<script>
+// Orologio live
+function updateClock() {
+  const now = new Date();
+  const t = now.toLocaleTimeString('it-IT');
+  document.getElementById('clock').textContent = t;
+  document.getElementById('status-time').textContent = t.slice(0,5);
+}
+updateClock();
+setInterval(updateClock, 1000);
+
+// Velocità animata
+let spd = 72;
+let dir = 1;
+setInterval(() => {
+  spd += dir * (Math.random() * 3);
+  if (spd > 88) dir = -1;
+  if (spd < 60) dir = 1;
+  const el = document.getElementById('speed-num');
+  el.textContent = Math.round(spd);
+  el.style.color = spd > 90 ? '#EF4444' : '#22C55E';
+}, 1000);
+
+// Km viaggio animati
+let km = 12.4;
+setInterval(() => {
+  km += Math.random() * 0.05;
+  document.getElementById('trip-km').textContent = km.toFixed(1) + ' km';
+}, 2000);
+
+// Durata viaggio animata
+let sec = 18*60+32;
+setInterval(() => {
+  sec++;
+  const m = Math.floor(sec/60), s = sec%60;
+  document.getElementById('trip-dur').textContent = m+'m '+String(s).padStart(2,'0')+'s';
+}, 1000);
+
+// Toggle tracking demo
+let tracking = true;
+function toggleTracking() {
+  tracking = !tracking;
+  const btn = document.getElementById('main-btn');
+  const trip = document.getElementById('trip-card');
+  const eu = document.getElementById('eu-card');
+  if (tracking) {
+    btn.textContent = '⏹  FERMA TRACKING';
+    btn.className = 'btn-main stop';
+    trip.style.display = '';
+    eu.style.display = '';
+    document.getElementById('mode-label').textContent = 'VIAGGIO';
+    document.getElementById('mode-label').style.color = '#22C55E';
+    document.getElementById('session-time').style.display = '';
+  } else {
+    btn.textContent = '▶  AVVIA TRACKING';
+    btn.className = 'btn-main';
+    trip.style.display = 'none';
+    document.getElementById('mode-label').textContent = 'RIPOSO';
+    document.getElementById('mode-label').style.color = '#475569';
+    document.getElementById('session-time').style.display = 'none';
+  }
+}
+
+// Viste demo
+function setView(v) {
+  document.querySelectorAll('.demo-btn').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+
+  document.getElementById('alert-speed').style.display = 'none';
+  document.getElementById('alert-eu').style.display = 'none';
+
+  if (v === 'idle') {
+    toggleTracking(); tracking = false;
+    if (document.querySelector('.btn-main.stop')) toggleTracking();
+  } else if (v === 'tracking') {
+    if (!tracking) { toggleTracking(); }
+  } else if (v === 'alert') {
+    if (!tracking) toggleTracking();
+    document.getElementById('alert-eu').style.display = 'block';
+    document.getElementById('cont-drive').textContent = '4h 02m';
+    document.getElementById('cont-drive').className = 'stat-val orange';
+    document.getElementById('to-break').textContent = '28m 14s';
+    document.getElementById('to-break').className = 'stat-val orange';
+    document.getElementById('eu-bar').style.width = '90%';
+    document.getElementById('eu-bar').style.background = '#F59E0B';
+    document.getElementById('eu-pct').textContent = '90% del limite UE (4h 30m)';
+  }
+}
+</script>
+</body>
+</html>
