@@ -58,7 +58,7 @@ const GPS_INTERVAL_CITY_MS   = 12_000;
 const GPS_INTERVAL_TRAVEL_MS = 4_000;
 const GPS_DISTANCE_CITY_M    = 10;
 const GPS_DISTANCE_TRAVEL_M  = 5;
-const GPS_ACCURACY_LIMIT_M   = 120;  // più alto = funziona in tasca
+const GPS_ACCURACY_LIMIT_M   = 120;
 
 const ACC_HZ_REST            = 1;
 const ACC_HZ_CITY            = 5;
@@ -66,6 +66,7 @@ const ACC_HZ_TRAVEL          = 50;
 const ACC_VARIANCE_THRESHOLD = 0.008;
 const ACC_VARIANCE_WINDOW    = 20;
 
+const REST_INACTIVITY_MIN    = 5;
 const UI_POLL_MS             = 2_000;
 
 // Limiti EU conducente
@@ -289,8 +290,6 @@ TaskManager.defineTask(BG_TASK, async ({ data, error }: any) => {
 
   await saveState(s);
 });
-
-const REST_INACTIVITY_MIN = 5;
 
 // ============================================================
 // FUNZIONI GPS
