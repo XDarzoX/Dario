@@ -16,12 +16,12 @@ import {
   SafeAreaView,
   AppState,
   AppStateStatus,
-  Linking,
 } from 'react-native';
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Accelerometer } from 'expo-sensors';
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 
 // ============================================================
 // PALETTE COLORI
@@ -334,6 +334,9 @@ function App(): React.JSX.Element {
   const [currentCity, setCurrentCity] = useState<string>('—');
   const [clock, setClock] = useState<string>(fmtClock());
   const [loading, setLoading] = useState<boolean>(true);
+  const [showMap, setShowMap] = useState<boolean>(false);
+  const [mapRegion, setMapRegion] = useState({ latitude: 41.9, longitude: 12.5, latitudeDelta: 0.02, longitudeDelta: 0.02 });
+  const routeCoords = useRef<{ latitude: number; longitude: number }[]>([]);
 
   const appState = useRef<AppStateStatus>(AppState.currentState);
   const accSubscription = useRef<any>(null);
@@ -402,6 +405,12 @@ function App(): React.JSX.Element {
           const speedKmh = Math.max(0, (loc.coords.speed ?? 0) * 3.6);
           const lat = loc.coords.latitude;
           const lon = loc.coords.longitude;
+
+          // Aggiorna mappa
+          setMapRegion({ latitude: lat, longitude: lon, latitudeDelta: 0.008, longitudeDelta: 0.008 });
+          routeCoords.current = [...routeCoords.current, { latitude: lat, longitude: lon }];
+          if (routeCoords.current.length > 1000) routeCoords.current = routeCoords.current.slice(-500);
+
           setState(prev => {
             if (!prev.isTracking) return prev;
             let addedDist = 0;
@@ -417,6 +426,8 @@ function App(): React.JSX.Element {
             return {
               ...prev,
               lastSpeedKmh: speedKmh,
+              lastLat: lat,
+              lastLon: lon,
               tripDistM: newTripDist,
               tripMaxSpeedKmh: prev.tripStartTs !== null ? newMaxSpeed : prev.tripMaxSpeedKmh,
             };
@@ -517,6 +528,7 @@ function App(): React.JSX.Element {
     } else {
       // START
       try {
+        routeCoords.current = [];
         await startGps('city');
         startAccelerometer('city');
         startFgWatcher();
@@ -721,6 +733,47 @@ function App(): React.JSX.Element {
           </View>
         )}
 
+        {/* ── CARD MAPPA ── */}
+        <TouchableOpacity
+          style={[s.exportBtn, { marginBottom: 12, borderColor: showMap ? C.green : C.border }]}
+          onPress={() => setShowMap(v => !v)}
+          activeOpacity={0.8}
+        >
+          <Text style={[s.exportBtnText, { color: showMap ? C.green : C.textSub }]}>
+            {showMap ? '▲  NASCONDI MAPPA' : '▼  MOSTRA MAPPA IN TEMPO REALE'}
+          </Text>
+        </TouchableOpacity>
+
+        {showMap && (
+          <View style={s.mapCard}>
+            <MapView
+              style={s.map}
+              provider={PROVIDER_GOOGLE}
+              region={mapRegion}
+              showsUserLocation
+              followsUserLocation
+              showsMyLocationButton={false}
+              showsCompass={false}
+              mapType="standard"
+            >
+              {routeCoords.current.length > 1 && (
+                <Polyline
+                  coordinates={routeCoords.current}
+                  strokeColor={C.green}
+                  strokeWidth={4}
+                />
+              )}
+              {state.lastLat !== null && state.lastLon !== null && (
+                <Marker
+                  coordinate={{ latitude: state.lastLat, longitude: state.lastLon }}
+                  title="Posizione attuale"
+                  pinColor={C.green}
+                />
+              )}
+            </MapView>
+          </View>
+        )}
+
         {/* ── CARD RIEPILOGO GIORNATA ── */}
         <View style={s.card}>
           <Text style={s.cardLabel}>GIORNATA — {day.date}</Text>
@@ -756,22 +809,6 @@ function App(): React.JSX.Element {
           <Text style={s.exportBtnText}>↑  ESPORTA GIORNATA</Text>
         </TouchableOpacity>
 
-        {/* ── PULSANTE MAPPA ── */}
-        <TouchableOpacity
-          style={[s.exportBtn, { borderColor: C.blue, marginBottom: 14 }]}
-          onPress={() => {
-            const lat = state.lastLat;
-            const lon = state.lastLon;
-            if (lat && lon) {
-              Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${lat},${lon}`);
-            } else {
-              Alert.alert('Posizione non disponibile', 'Avvia il tracking prima.');
-            }
-          }}
-          activeOpacity={0.8}
-        >
-          <Text style={[s.exportBtnText, { color: C.blue }]}>⊕  VEDI POSIZIONE SU MAPPA</Text>
-        </TouchableOpacity>
 
         {/* ── LISTA EVENTI ── */}
         {day.events.length > 0 && (
@@ -907,6 +944,17 @@ const s = StyleSheet.create({
   eventSub:   { fontSize: 12, color: C.textSub, marginTop: 2 },
 
   label: { fontSize: 14, color: C.text },
+
+  // Mappa
+  mapCard: {
+    borderRadius: 12,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: C.border,
+    marginBottom: 12,
+    height: 300,
+  },
+  map: { flex: 1 },
 });
 
 registerRootComponent(App);
